@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Revolution Add-on</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Revolution</h1>
+      <p id="statusText">Verbindung wird geprüft…</p>
+      <p id="statusMeta" class="meta"></p>
+      <p id="clientState" class="meta subtle"></p>
+      <section id="pendingContainer" hidden>
+        <p id="pendingText" class="meta pending"></p>
+        <button id="switchProfileButton" class="secondary">Profil wechseln</button>
+      </section>
+      <button id="loginButton">Über Webseite einloggen</button>
+      <button id="logoutButton" hidden class="danger">Abmelden</button>
+
+      <section id="messagingSection" hidden style="margin-top: 16px; padding: 12px; background: #f0f8ff; border-radius: 6px; border: 1px solid #b8d4e8;">
+        <h2 style="margin: 0 0 8px 0; font-size: 14px; color: #333;">📨 Messaging</h2>
+        <button id="simulateCloseButton" class="test-button" style="width: 100%; padding: 6px 12px; font-size: 13px; margin-top: 4px;">
+          🔄 Tab-Schließen simulieren (Bewertung starten)
+        </button>
+        <div id="messagesContainer" style="margin-top: 12px; max-height: 300px; overflow-y: auto;">
+          <div id="messagesList"></div>
+        </div>
+      </section>
+
+      <section id="exportSection" hidden style="margin-top: 16px; padding: 12px; background: #f0fff4; border-radius: 6px; border: 1px solid #b8e6c8;">
+        <h2 style="margin: 0 0 8px 0; font-size: 14px; color: #333;">📦 Export</h2>
+        <p style="margin: 0 0 10px 0; font-size: 11px; color: #666;">Alle lokalen Addon-Daten: Ratings, Transaktionen, Wallet, Keys</p>
+        <div style="display: flex; gap: 8px;">
+          <button id="exportCSVButton" class="export-btn export-csv">📊 CSV</button>
+          <button id="exportJSONButton" class="export-btn export-json">📋 JSON</button>
+        </div>
+      </section>
+
+      <details style="margin-top: 16px;">
+        <summary style="cursor: pointer; font-weight: bold; color: #666;">🔍 Debug-Logs</summary>
+        <div id="debugLogs" style="max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 10px; background: #f5f5f5; padding: 8px; margin-top: 8px; border-radius: 4px;"></div>
+      </details>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

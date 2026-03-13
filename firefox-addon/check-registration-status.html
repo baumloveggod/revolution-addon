@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Check Registration Status</title>
+  <style>
+    body {
+      font-family: monospace;
+      padding: 20px;
+      background: #1e1e1e;
+      color: #d4d4d4;
+    }
+    .section {
+      margin: 20px 0;
+      padding: 15px;
+      background: #2d2d2d;
+      border-left: 3px solid #007acc;
+    }
+    .success { color: #4ec9b0; }
+    .error { color: #f48771; }
+    .warning { color: #dcdcaa; }
+    button {
+      background: #007acc;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      cursor: pointer;
+      font-family: monospace;
+      margin: 5px;
+    }
+    button:hover {
+      background: #005a9e;
+    }
+    pre {
+      background: #1e1e1e;
+      padding: 10px;
+      overflow-x: auto;
+      border: 1px solid #3e3e3e;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔍 Messaging Registration Debug</h1>
+
+  <div class="section">
+    <h2>Local Storage (Website Context)</h2>
+    <button onclick="checkLocalStorage()">Check localStorage</button>
+    <pre id="localStorage-result">Click button to check...</pre>
+  </div>
+
+  <div class="section">
+    <h2>Addon Storage (if available)</h2>
+    <button onclick="checkAddonStorage()">Check browser.storage</button>
+    <pre id="addonStorage-result">Click button to check...</pre>
+  </div>
+
+  <div class="section">
+    <h2>Server Registration</h2>
+    <button onclick="checkServerRegistration()">Check Server</button>
+    <pre id="server-result">Click button to check...</pre>
+  </div>
+
+  <div class="section">
+    <h2>Force Re-registration</h2>
+    <button onclick="clearAndReregister()">Clear Keys & Re-register</button>
+    <pre id="reregister-result">Click button to clear and re-register...</pre>
+  </div>
+
+  <script>
+    function checkLocalStorage() {
+      const result = document.getElementById('localStorage-result');
+
+      const keys = [
+        'messaging_keypair',
+        'messaging_signing_keypair',
+        'messaging_group_id',
+        'messaging_fingerprint'
+      ];
+
+      let output = 'LocalStorage Keys:\n\n';
+
+      keys.forEach(key => {
+        const value = localStorage.getItem(key);
+        if (value) {
+          const parsed = key.includes('keypair') ? JSON.parse(value) : value;
+          output += `✓ ${key}:\n`;
+          if (typeof parsed === 'object') {
+            output += `  publicKey: ${parsed.publicKey?.substring(0, 40)}...\n`;
+            if (parsed.privateKey) {
+              output += `  privateKey: [${parsed.privateKey.length} chars]\n`;
+            }
+          } else {
+            output += `  ${parsed}\n`;
+          }
+        } else {
+          output += `✗ ${key}: not found\n`;
+        }
+        output += '\n';
+      });
+
+      result.textContent = output;
+    }
+
+    async function checkAddonStorage() {
+      const result = document.getElementById('addonStorage-result');
+
+      if (typeof browser === 'undefined' || !browser.storage) {
+        result.textContent = '⚠ browser.storage API not available (not in addon context)';
+        result.className = 'warning';
+        return;
+      }
+
+      try {
+        const keys = await browser.storage.local.get([
+          'messaging_keypair',
+          'messaging_signing_keypair',
+          'messaging_group_id',
+          'messaging_fingerprint'
+        ]);
+
+        let output = 'Browser.storage.local Keys:\n\n';
+
+        Object.entries(keys).forEach(([key, value]) => {
+          output += `✓ ${key}:\n`;
+          if (typeof value === 'object' && value.publicKey) {
+            output += `  publicKey: ${value.publicKey.substring(0, 40)}...\n`;
+            if (value.privateKey) {
+              output += `  privateKey: [${value.privateKey.length} chars]\n`;
+            }
+          } else {
+            output += `  ${JSON.stringify(value)}\n`;
+          }
+          output += '\n';
+        });
+
+        result.textContent = output;
+      } catch (error) {
+        result.textContent = '❌ Error: ' + error.message;
+        result.className = 'error';
+      }
+    }
+
+    async function checkServerRegistration() {
+      const result = document.getElementById('server-result');
+      result.textContent = 'Checking server...';
+
+      try {
+        // Get token from localStorage
+        const token = localStorage.getItem('token');
+        if (!token) {
+          result.textContent = '❌ No token found in localStorage';
+          result.className = 'error';
+          return;
+        }
+
+        // Decode token to get userId
+        const tokenPayload = JSON.parse(atob(token.split('.')[1]));
+        const groupId = `group-user-${tokenPayload.userId}`;
+
+        // Fetch group keys from server
+        const response = await fetch(`http://localhost:4200/keys?groupId=${groupId}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        if (!response.ok) {
+          throw new Error(`Server responded with ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        let output = `Server Registration Status:\n\n`;
+        output += `Group ID: ${groupId}\n`;
+        output += `Total Clients: ${data.keys?.length || 0}\n\n`;
+
+        if (data.keys && data.keys.length > 0) {
+          data.keys.forEach((client, index) => {
+            output += `Client ${index + 1}:\n`;
+            output += `  Fingerprint: ${client.fingerprint}\n`;
+            output += `  PublicKey: ${client.publicKey.substring(0, 40)}...\n`;
+            output += `  SigningKey: ${client.signingPublicKey.substring(0, 40)}...\n\n`;
+          });
+
+          // Check if our fingerprint is registered
+          const ourFingerprint = localStorage.getItem('messaging_fingerprint');
+          if (ourFingerprint) {
+            const isRegistered = data.keys.some(k => k.fingerprint === ourFingerprint);
+            output += `\n`;
+            output += isRegistered
+              ? `✓ This client (${ourFingerprint.substring(0, 16)}...) IS registered\n`
+              : `✗ This client (${ourFingerprint.substring(0, 16)}...) is NOT registered\n`;
+          }
+        } else {
+          output += '⚠ No clients registered in this group\n';
+        }
+
+        result.textContent = output;
+      } catch (error) {
+        result.textContent = '❌ Error: ' + error.message;
+        result.className = 'error';
+      }
+    }
+
+    async function clearAndReregister() {
+      const result = document.getElementById('reregister-result');
+      result.textContent = 'Clearing keys and re-registering...';
+
+      try {
+        // Clear localStorage
+        localStorage.removeItem('messaging_keypair');
+        localStorage.removeItem('messaging_signing_keypair');
+        localStorage.removeItem('messaging_group_id');
+        localStorage.removeItem('messaging_fingerprint');
+
+        result.textContent = '✓ Cleared localStorage\n\nPlease reload the page to re-register.';
+        result.className = 'success';
+      } catch (error) {
+        result.textContent = '❌ Error: ' + error.message;
+        result.className = 'error';
+      }
+    }
+  </script>
+</body>
+</html>

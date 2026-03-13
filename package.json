@@ -1,0 +1,16 @@
+{
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build:wallet-bundle": "rollup -c firefox-addon/wallet-bundle/rollup.config.js"
+  },
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "^15.0.0",
+    "rollup": "^4.0.0"
+  },
+  "dependencies": {
+    "libsodium-wrappers": "^0.7.16"
+  }
+}

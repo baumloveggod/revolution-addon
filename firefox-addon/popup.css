@@ -1,0 +1,238 @@
+:root {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: #0c0c0d;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  min-width: 260px;
+}
+
+main {
+  padding: 16px;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+p {
+  margin: 4px 0;
+  font-size: 13px;
+}
+
+.meta {
+  color: #4a4a4f;
+}
+
+.meta.subtle {
+  color: #5c5c70;
+  font-size: 12px;
+}
+
+button {
+  margin-top: 12px;
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 14px;
+  border: none;
+  border-radius: 6px;
+  background: #0056d2;
+  color: #fff;
+  cursor: pointer;
+}
+
+button[disabled] {
+  opacity: 0.65;
+  cursor: progress;
+}
+
+#pendingContainer {
+  margin-top: 12px;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #d7d7db;
+  background: #f4f4f6;
+}
+
+#pendingContainer .pending {
+  color: #2b2b30;
+}
+
+button.secondary {
+  background: #f0f0ff;
+  color: #04204a;
+  border: 1px solid #b1b5d0;
+}
+
+button.secondary[disabled] {
+  opacity: 0.7;
+}
+
+button.danger {
+  background: #c50042;
+  color: #fff;
+  border: none;
+}
+
+button.danger:hover {
+  background: #a10034;
+}
+
+.test-button {
+  background: #28a745;
+  color: white;
+}
+
+.test-button:hover {
+  background: #218838;
+}
+
+.test-button:disabled {
+  background: #6c757d;
+  opacity: 0.65;
+}
+
+#messagesList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.message-card {
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 11px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.message-card.new {
+  animation: slideIn 0.3s ease-out;
+  border-left: 3px solid #007bff;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.message-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.message-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.message-badge.type-event {
+  background: #e3f2fd;
+  color: #1976d2;
+}
+
+.message-badge.type-data {
+  background: #f3e5f5;
+  color: #7b1fa2;
+}
+
+.message-badge.type-system {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.message-badge.source-addon {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.message-badge.source-website {
+  background: #fff9c4;
+  color: #f57f17;
+}
+
+.message-time {
+  font-size: 9px;
+  color: #999;
+}
+
+.message-sender {
+  font-size: 9px;
+  color: #666;
+  font-family: monospace;
+  margin-bottom: 4px;
+}
+
+.message-payload {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 3px;
+  padding: 6px;
+  font-family: monospace;
+  font-size: 9px;
+  overflow-x: auto;
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+.message-payload pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.empty-messages {
+  text-align: center;
+  padding: 16px;
+  color: #999;
+  font-size: 11px;
+}
+
+.export-btn {
+  flex: 1;
+  margin-top: 0;
+  padding: 6px 10px;
+  font-size: 13px;
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.export-btn:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.export-csv {
+  background: #28a745;
+}
+
+.export-csv:hover {
+  background: #218838;
+}
+
+.export-json {
+  background: #007bff;
+}
+
+.export-json:hover {
+  background: #0056b3;
+}

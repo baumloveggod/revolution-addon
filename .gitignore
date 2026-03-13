@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build outputs
+dist/
+build/
+*.bundle.js
+
+# Firefox addon generated files
+firefox-addon/wallet-bundle/
+firefox-addon/wallet/wallet-bundle.js
+firefox-addon/config.js
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.local
+
+# Claude Code
+.claude/
+
+# packages/ build outputs
+packages/**/node_modules/
+packages/**/dist/

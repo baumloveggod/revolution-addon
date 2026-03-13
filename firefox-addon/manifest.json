@@ -1,0 +1,77 @@
+{
+  "manifest_version": 2,
+  "name": "Revolution Web Connector",
+  "description": "Koppelt das Add-on mit der Revolution-Webseite und übernimmt den Login-Status automatisch.",
+  "version": "1.0.0",
+  "browser_action": {
+    "default_title": "Revolution verbinden",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "scripts": [
+      "log-client.js",
+      "config.js",
+      "services/debugLogger.js",
+      "services/api-client.js",
+      "services/update-checker.js",
+      "sodium.js",
+      "messaging-client/crypto.js",
+      "crypto/sealed-box.js",
+      "messaging-client/storage.js",
+      "messaging-client/client.js",
+      "messaging-integration.js",
+      "tracking.js",
+      "services/entity-resolver.js",
+      "scoring/scoring-config.js",
+      "scoring/content-detector.js",
+      "scoring/quality-analyzer.js",
+      "scoring/interaction-scorer.js",
+      "scoring/satisfaction-scorer.js",
+      "scoring/scoring-engine.js",
+      "distribution/translation-factor-tracker.js",
+      "distribution/start-safety-factor.js",
+      "distribution/damping-safety-factor.js",
+      "distribution/fluctuation-safety-factor.js",
+      "distribution/prognosis-safety-factor.js",
+      "distribution/prognosis-model.js",
+      "distribution/calibration-manager.js",
+      "distribution/distribution-engine.js",
+      "services/transaction-corrector.js",
+      "services/retro-payout-service.js",
+      "privacy/e24-rounding.js",
+      "privacy/transaction-queue.js",
+      "privacy/privacy-layer.js",
+      "wallet/wallet-bundle.js",
+      "ngo/criteria-matcher.js",
+      "ngo/or-wallet-manager.js",
+      "scoring/revolution-scoring.js",
+      "background.js"
+    ],
+    "persistent": true
+  },
+  "permissions": [
+    "storage",
+    "tabs",
+    "<all_urls>",
+    "http://localhost:3000/*",
+    "http://127.0.0.1:3000/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "http://localhost:3000/*",
+        "http://127.0.0.1:3000/*"
+      ],
+      "js": [
+        "contentScript.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "revolution-addon@example.com"
+    }
+  }
+}
