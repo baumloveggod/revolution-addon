@@ -73,18 +73,18 @@
       const response = await fetch(`${origin}/auth/config`);
       if (response.ok) {
         const config = await response.json();
-        return config.messagingServiceUrl || 'http://192.168.178.130:4200';
+        return config.messagingServiceUrl || 'https://msg.lenkenhoff.de';
       }
     } catch (error) {
       console.warn('[MessagingIntegration] ⚠️ Failed to get config, using default', error.message);
     }
-    return 'http://192.168.178.130:4200'; // Fallback for development
+    return 'https://msg.lenkenhoff.de';
   }
 
   /**
    * Initialize messaging (generates keypairs even without token)
    */
-  window.MessagingIntegration.initMessaging = async function(userToken, origin = 'http://192.168.178.130:3000') {
+  window.MessagingIntegration.initMessaging = async function(userToken, origin = 'https://api.lenkenhoff.de') {
     // Skip if initialization is in progress - return existing promise instead of busy-wait
     if (isInitializing && initializationPromise) {
       console.log('[MessagingIntegration] ⏳ Initialization already in progress, waiting for completion...');
@@ -550,10 +550,13 @@ async function handleAddressUpdate(payload) {
         const websiteEncryptionPublicKey = data.website.encryption_key;
 
         // Decrypt using X25519 box
+        // ciphertext/nonce are URLSAFE_NO_PADDING (website-encoded)
+        // websitePublicKey is URLSAFE_NO_PADDING (website-generated)
+        // myPrivateKey is ORIGINAL base64 (addon-generated via sodium.to_base64 default)
         const ciphertextBytes = sodium.from_base64(cl_wallet_key.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
         const nonceBytes = sodium.from_base64(cl_wallet_key.nonce, sodium.base64_variants.URLSAFE_NO_PADDING);
         const websitePublicKeyBytes = sodium.from_base64(websiteEncryptionPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-        const myPrivateKeyBytes = sodium.from_base64(myEncryptionPrivateKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const myPrivateKeyBytes = sodium.from_base64(myEncryptionPrivateKey); // ORIGINAL variant (addon default)
 
         const decryptedBytes = sodium.crypto_box_open_easy(
           ciphertextBytes,
