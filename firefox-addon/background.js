@@ -2,7 +2,7 @@
 console.log('[background.js] 🔥 FILE LOADING - Version 0.1.5');
 
 const STORAGE_KEY = 'rev_connector_state';
-const SITE_ORIGINS = ['http://192.168.178.130:3000', 'http://192.168.178.130:3000'];
+const SITE_ORIGINS = ['https://api.lenkenhoff.de'];
 const INSTALL_REDIRECT_PATH = '/account.html?addon=firefox';
 const LOGIN_PATH = '/login.html';
 const manifest = typeof browser !== 'undefined' && browser.runtime && browser.runtime.getManifest
@@ -110,8 +110,8 @@ async function initializeWalletDependencies() {
   if (!window._walletManager) {
     console.log('[initWallets] Initializing WalletManager globally...');
     window._walletManager = new WalletManager({
-      clApiUrl:     'https://192.168.178.130:4100',
-      clReadApiUrl: 'https://192.168.178.130:4101',
+      clApiUrl:     'https://ledger.lenkenhoff.de',
+      clReadApiUrl: 'https://read.lenkenhoff.de',
       storage:      browser.storage.local,
       fetch:        window.fetchWithVersion
     });
@@ -120,9 +120,9 @@ async function initializeWalletDependencies() {
   if (!window._anonClient) {
     console.log('[initWallets] Initializing AnonTransactionClient globally...');
     window._anonClient = new AnonTransactionClient({
-      anonApiUrl:   'https://192.168.178.130:4100/anon',
-      clApiUrl:     'https://192.168.178.130:4100',
-      clReadApiUrl: 'https://192.168.178.130:4101',
+      anonApiUrl:   'https://ledger.lenkenhoff.de/anon',
+      clApiUrl:     'https://ledger.lenkenhoff.de',
+      clReadApiUrl: 'https://read.lenkenhoff.de',
       fetch:        window.fetchWithVersion,
       sodium:       window.sodium
     });
@@ -427,12 +427,11 @@ async function claimInvite(origin, inviteToken, userToken) {
     }, 'info');
   }
 
-  // Get website tab (must be localhost:3000 or configured origin)
+  // Get website tab (must be api.lenkenhoff.de or configured origin)
   const allTabs = await browser.tabs.query({});
   const websiteTab = allTabs.find(tab =>
     tab.url && (
-      tab.url.startsWith('http://192.168.178.130:3000') ||
-      tab.url.startsWith('http://192.168.178.130:3000') ||
+      tab.url.startsWith('https://api.lenkenhoff.de') ||
       tab.url.startsWith(origin)
     )
   );
@@ -1465,8 +1464,17 @@ async function handleLogout() {
   return { ok: true };
 }
 
-browser.runtime.onInstalled.addListener((details) => {
-  // Kein Redirect mehr - Nutzer muss sich manuell auf der Webseite anmelden
+browser.runtime.onInstalled.addListener(async (details) => {
+  if (details.reason === 'install') {
+    // Fresh install: wipe any leftover data from a previous installation
+    console.log('[revolution-addon] Fresh install detected – clearing all storage');
+    try {
+      await browser.storage.local.clear();
+      console.log('[revolution-addon] ✅ Storage cleared on fresh install');
+    } catch (error) {
+      console.error('[revolution-addon] ❌ Failed to clear storage on install:', error);
+    }
+  }
 });
 
 // Cleanup satisfaction data when tabs are closed (v2.0.0)
@@ -1676,8 +1684,8 @@ async function initializeWalletSystem(clWalletAddress = null, privateKey = null,
 
     // 3. Initialisiere WalletManager
     const walletManager = new window.WalletManager({
-      clApiUrl:     'https://192.168.178.130:4100',
-      clReadApiUrl: 'https://192.168.178.130:4101',
+      clApiUrl:     'https://ledger.lenkenhoff.de',
+      clReadApiUrl: 'https://read.lenkenhoff.de',
       storage:      browser.storage.local,
       fetch:        window.fetchWithVersion
     });
@@ -1694,9 +1702,9 @@ async function initializeWalletSystem(clWalletAddress = null, privateKey = null,
 
     // 5. Initialisiere AnonTransactionClient
     const anonClient = new window.AnonTransactionClient({
-      anonApiUrl:   'https://192.168.178.130:4100/anon',
-      clApiUrl:     'https://192.168.178.130:4100',
-      clReadApiUrl: 'https://192.168.178.130:4101',
+      anonApiUrl:   'https://ledger.lenkenhoff.de/anon',
+      clApiUrl:     'https://ledger.lenkenhoff.de',
+      clReadApiUrl: 'https://read.lenkenhoff.de',
       fetch:        window.fetchWithVersion,
       sodium:       window.sodium
     });
@@ -1888,8 +1896,10 @@ async function initializeBackgroundScript() {
         // This handles the case where the initial ADDRESS_UPDATE was missed (race condition)
         const state = await loadState();
         if (state && state.device && state.deviceStatus === 'linked') {
-          // Delay to ensure messaging system is initialized (runs at 4s)
-          setTimeout(async () => {
+          // Retry sending request_address_update every 30s until wallet arrives
+          async function tryRequestAddressUpdate() {
+            const currentData = await browser.storage.local.get(['rev_cl_wallet']);
+            if (currentData.rev_cl_wallet) return; // Wallet arrived, stop retrying
             try {
               const messagingClient = window.MessagingIntegration?.getClient();
               if (messagingClient && typeof window.MessagingIntegration?.sendMessage === 'function') {
@@ -1900,7 +1910,11 @@ async function initializeBackgroundScript() {
             } catch (err) {
               console.warn('[revolution-addon] ⚠️ Failed to request ADDRESS_UPDATE:', err.message);
             }
-          }, 3000); // Wait for messaging init (runs at 4s total from startup)
+            // Schedule next retry in 30s (website may not be open yet)
+            setTimeout(tryRequestAddressUpdate, 30000);
+          }
+          // First attempt after messaging init (4s total from startup)
+          setTimeout(tryRequestAddressUpdate, 3000);
         }
       }
     } catch (error) {
