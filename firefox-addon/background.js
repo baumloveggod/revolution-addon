@@ -1266,6 +1266,22 @@ async function applyPendingProfile() {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
 
+      // Send device handoff BEFORE stopping messaging so queue + mintBuffer reach the website
+      try {
+        const revolution = typeof window.getRevolutionScoring === 'function'
+          ? window.getRevolutionScoring() : null;
+        const tq = revolution?.privacyLayer?.transactionQueue;
+        if (tq && typeof tq.sendDeviceHandoff === 'function') {
+          console.log('[revolution-addon] 📤 Sending device handoff before profile switch...');
+          await tq.sendDeviceHandoff();
+          await new Promise(resolve => setTimeout(resolve, 300));
+          console.log('[revolution-addon] ✅ Device handoff sent (profile switch)');
+        }
+      } catch (handoffError) {
+        console.error('[revolution-addon] ❌ Failed to send device handoff on profile switch:', handoffError);
+        // Non-fatal: continue
+      }
+
       // Stop messaging for old profile
       if (typeof window.MessagingIntegration?.stopMessaging === 'function') {
         window.MessagingIntegration.stopMessaging();
@@ -1362,6 +1378,22 @@ async function handleLogout() {
         fingerprint: messagingClient.fingerprint,
         timestamp: Date.now()
       };
+
+      // Send device handoff BEFORE client_disconnected so website can receive it first
+      try {
+        const revolution = typeof window.getRevolutionScoring === 'function'
+          ? window.getRevolutionScoring() : null;
+        const tq = revolution?.privacyLayer?.transactionQueue;
+        if (tq && typeof tq.sendDeviceHandoff === 'function') {
+          console.log('[revolution-addon] 📤 Sending device handoff before logout...');
+          await tq.sendDeviceHandoff();
+          await new Promise(resolve => setTimeout(resolve, 300));
+          console.log('[revolution-addon] ✅ Device handoff sent (logout)');
+        }
+      } catch (handoffError) {
+        console.error('[revolution-addon] ❌ Failed to send device handoff on logout:', handoffError);
+        // Non-fatal: continue with logout
+      }
 
       await window.MessagingIntegration.sendMessage(disconnectPayload, 'client_disconnected');
       console.log('[revolution-addon] ✅ client_disconnected message sent');
