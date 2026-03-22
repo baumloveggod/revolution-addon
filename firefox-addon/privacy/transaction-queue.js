@@ -234,8 +234,14 @@ class TransactionQueue {
       }
 
       // 3c. Verify DS wallet is registered in Central Ledger (remote validation)
+      // Retry once after 600ms to handle race condition where wallet was just registered
+      // and the read store hasn't replicated it yet.
       try {
-        const registrationCheck = await this.anonClient.checkWalletRegistration(transaction.walletAddress);
+        let registrationCheck = await this.anonClient.checkWalletRegistration(transaction.walletAddress);
+        if (!registrationCheck.registered) {
+          await new Promise(resolve => setTimeout(resolve, 600));
+          registrationCheck = await this.anonClient.checkWalletRegistration(transaction.walletAddress);
+        }
         if (!registrationCheck.registered) {
           console.error('[TransactionQueue] ❌ Step 3c BLOCKED: DS wallet not registered in Central Ledger!', {
             walletAddress: transaction.walletAddress
