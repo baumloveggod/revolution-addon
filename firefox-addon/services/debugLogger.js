@@ -8,7 +8,7 @@
 (function() {
   'use strict';
 
-  const LOGGING_SERVICE_URL = 'http://192.168.178.130:4301';
+  const LOGGING_SERVICE_URL = 'https://log.lenkenhoff.de';
   const COMPONENT_NAME = 'browser-addon';
   const LOG_QUEUE = [];
   const MAX_QUEUE_SIZE = 50;

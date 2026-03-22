@@ -24,14 +24,11 @@ class TransactionCorrector {
    * Hauptfunktion: Prüft alle Ratings und erstellt Korrekturen bei Bedarf
    */
   async checkAndCorrectTransactions() {
-    console.log('[TransactionCorrector] Starting correction check...');
-
     try {
       // 1. Hole alle Ratings letzten 30 Tage
       const ratings = await this.tracker.getRatingsLast30Days();
 
       if (ratings.length === 0) {
-        console.log('[TransactionCorrector] No ratings to correct');
         return { corrected: 0, skipped: 0 };
       }
 
@@ -45,13 +42,6 @@ class TransactionCorrector {
       const userData = await this.distributionEngine.getUserData(this.storage);
       const factorHistory = await this.tracker.getFactorHistory(90);
       const prognosisSF = this.distributionEngine.prognosisModel.calculatePrognosisSF(factorHistory);
-
-      console.log('[TransactionCorrector] Current state:', {
-        ratingsCount: ratings.length,
-        transactionsCount: storedTransactions.length,
-        currentFactor: currentFactor.toString(),
-        prognosisSF: prognosisSF
-      });
 
       // 5. Prüfe jedes Rating auf Korrekturbedarf
       let corrected = 0;
@@ -73,14 +63,7 @@ class TransactionCorrector {
         }
       }
 
-      console.log('[TransactionCorrector] Correction check completed:', {
-        corrected,
-        skipped,
-        total: ratings.length
-      });
-
       return { corrected, skipped };
-
     } catch (error) {
       console.error('[TransactionCorrector] Error during correction check:', error);
       throw error;
@@ -108,16 +91,6 @@ class TransactionCorrector {
     // Differenz
     const differenz = sollTokens - istTokensSum;
     const deviation = Number(differenz) / Number(sollTokens);
-
-    console.log('[TransactionCorrector] Rating check:', {
-      ratingRef: rating.ratingRef,
-      domain: rating.domain,
-      score: rating.score,
-      sollTokens: sollTokens.toString(),
-      istTokensSum: istTokensSum.toString(),
-      differenz: differenz.toString(),
-      deviation: (deviation * 100).toFixed(2) + '%'
-    });
 
     // Prüfe ob Korrektur nötig ist
     if (Math.abs(deviation) > this.CORRECTION_THRESHOLD && differenz > this.MIN_CORRECTION_TOKENS) {
@@ -162,12 +135,6 @@ class TransactionCorrector {
    * Erstellt eine Korrektur-Transaktion
    */
   async createCorrectionTransaction(rating, differenz, sollTokens, istTokensSum, currentFactor, prognosisSF) {
-    console.log('[TransactionCorrector] Creating correction transaction:', {
-      ratingRef: rating.ratingRef,
-      domain: rating.domain,
-      differenz: differenz.toString()
-    });
-
     const transaction = {
       type: 'correction',
       ratingRef: rating.ratingRef,
@@ -190,15 +157,11 @@ class TransactionCorrector {
       try {
         // Send correction transaction as 'rating' type (corrections are special rating transactions)
         await this.messagingClient.sendMessage(transaction, 'rating');
-
-        console.log('[TransactionCorrector] Correction sent via messaging');
       } catch (error) {
         console.warn('[TransactionCorrector] Failed to send correction via messaging:', error);
         // Nicht kritisch, Transaktion ist lokal gespeichert
       }
     }
-
-    console.log('[TransactionCorrector] Correction transaction created:', transaction);
   }
 
   /**
@@ -227,12 +190,6 @@ class TransactionCorrector {
     });
 
     await this.storage.set({ rev_stored_transactions: cleaned });
-
-    console.log('[TransactionCorrector] Transaction stored:', {
-      ref: transaction.ratingRef,
-      type: transaction.type,
-      total: cleaned.length
-    });
   }
 
   /**

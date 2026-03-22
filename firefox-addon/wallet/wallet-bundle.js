@@ -58,10 +58,6 @@
      */
     async storeWalletLocally(wallet) {
       await this.storage.set({ rev_cl_wallet: wallet });
-
-      console.log('[WalletManager] Wallet stored locally:', {
-        address: wallet.address.substring(0, 20) + '...'
-      });
     }
 
     /**
@@ -121,11 +117,6 @@
       // PERFORMANCE: Check cache first
       const cached = this.balanceCache.get(address);
       if (cached && (Date.now() - cached.timestamp) < this.balanceCacheTimeout) {
-        console.log('[WalletManager] Balance from cache:', {
-          address: address.substring(0, 20) + '...',
-          balance: cached.balance.toString(),
-          age: Math.floor((Date.now() - cached.timestamp) / 1000) + 's'
-        });
         return cached.balance;
       }
 
@@ -165,12 +156,6 @@
         this.balanceCache.set(address, {
           balance,
           timestamp: Date.now()
-        });
-
-        console.log('[WalletManager] Balance fetched:', {
-          address: address.substring(0, 20) + '...',
-          balance: balance.toString(),
-          registered: data.registered
         });
 
         return balance;
@@ -230,12 +215,9 @@
       if (cached && cached.address === clWalletAddress) {
         // Update keys if provided and not already set
         if ((privateKey && !cached.privateKey) || (publicKey && !cached.publicKey)) {
-          console.log('[WalletManager] Updating cached wallet with keys');
           cached.privateKey = privateKey || cached.privateKey;
           cached.publicKey = publicKey || cached.publicKey;
           await this.storeWalletLocally(cached);
-        } else {
-          console.log('[WalletManager] Using cached wallet');
         }
         return cached;
       }
@@ -250,12 +232,6 @@
 
       // 3. Speichere lokal
       await this.storeWalletLocally(wallet);
-
-      console.log('[WalletManager] Wallet initialized:', {
-        address: wallet.address.substring(0, 20) + '...',
-        hasPrivateKey: !!wallet.privateKey,
-        hasPublicKey: !!wallet.publicKey
-      });
 
       return wallet;
     }
@@ -295,25 +271,16 @@
      */
     async detectAndRecordFirstBaTransfer(address, translationFactorTracker) {
       try {
-        console.log('[WalletManager] detectAndRecordFirstBaTransfer called:', {
-          address: address?.substring(0, 20) + '...',
-          hasTracker: !!translationFactorTracker
-        });
-
         // 1. Prüfe ob Timestamp bereits gesetzt ist
         const existingTimestamp = await translationFactorTracker.getFirstBaToCLTimestamp();
-        console.log('[WalletManager] Existing timestamp:', existingTimestamp);
 
         if (existingTimestamp !== null) {
           // Bereits gesetzt, nichts zu tun
-          console.log('[WalletManager] Timestamp already set, skipping detection');
           return false;
         }
 
         // 2. Hole Transaktionen für diese Wallet
-        console.log('[WalletManager] Fetching transactions for:', address);
         const transactions = await this.getTransactions(address);
-        console.log('[WalletManager] Found transactions:', transactions.length);
 
         // 3. Finde ersten BA→CL Transfer (direction: "in", counterparty ist BA-Wallet)
         const firstBaTransfer = transactions.find(tx =>
@@ -323,19 +290,12 @@
 
         if (!firstBaTransfer) {
           // Noch kein BA→CL Transfer
-          console.log('[WalletManager] No BA→CL transfer found yet');
           return false;
         }
 
         // 4. Setze Timestamp (in Sekunden, vom BA Transfer, nicht jetzt!)
         const transferTimestamp = Math.floor(Date.parse(firstBaTransfer.at) / 1000);
         await translationFactorTracker.recordFirstBaToCLTransfer(transferTimestamp);
-
-        console.log('[WalletManager] First BA→CL transfer detected and recorded:', {
-          transferDate: firstBaTransfer.at,
-          timestamp: transferTimestamp,
-          amount: firstBaTransfer.amount?.tokens || 'unknown'
-        });
 
         return true;
 
@@ -351,7 +311,6 @@
      */
     async clearLocalWallet() {
       await this.storage.remove(['rev_cl_wallet']);
-      console.log('[WalletManager] Local wallet cleared');
     }
   }
 
@@ -404,11 +363,6 @@
      */
     async mintAnonNote(clWallet, amount, fingerprint = null) {
       try {
-        console.log('[AnonTxClient] Minting anonymous note:', {
-          amount: amount.toString(),
-          clWallet: clWallet.address.substring(0, 20) + '...'
-        });
-
         // 1. Fetch RSA public key vom Stealth-Hop
         const { n, e } = await this.fetchPublicKey();
 
@@ -430,15 +384,7 @@
         );
 
         // 6. Unblind signature (now uses O(log n) Extended Euclidean Algorithm)
-        console.log('[AnonTxClient] 📍 Step 6: Unblinding signature...');
         const signature = this.unblindSignature(mintResponse.blindSignature, blindingFactor, n);
-
-        console.log('[AnonTxClient] ✅ Anonymous note minted:', {
-          serial: serial.substring(0, 16) + '...',
-          signature: signature.substring(0, 16) + '...',
-          blockId: mintResponse.blockId,
-          blockStatus: mintResponse.blockStatus
-        });
 
         return {
           serial,
@@ -470,13 +416,6 @@
      */
     async spendAnonNote(serial, signature, amount, destinationAddress, fingerprint = null, blockId = null) {
       try {
-        console.log('[AnonTxClient] 📍 spendAnonNote: Starting SH → DS spend...', {
-          serial: serial.substring(0, 16) + '...',
-          destination: destinationAddress,
-          amount: amount.toString(),
-          isValidDestination: destinationAddress?.startsWith('DS::') || destinationAddress?.startsWith('OR::')
-        });
-
         // Validate destination address
         if (!destinationAddress || destinationAddress.startsWith('pending:')) {
           console.error('[AnonTxClient] ❌ spendAnonNote: Invalid destination address!', {
@@ -484,10 +423,6 @@
           });
           throw new Error(`Invalid destination address: ${destinationAddress}`);
         }
-
-        console.log('[AnonTxClient] 📍 spendAnonNote: Calling POST /anon/spend...', {
-          endpoint: `${this.anonApiUrl}/spend`
-        });
 
         // POST /anon/spend
         const payload = {
@@ -521,10 +456,6 @@
         const spendResult = await response.json();
         const txHash = spendResult.id != null ? String(spendResult.id) : spendResult.txHash || null;
 
-        console.log('[AnonTxClient] Anonymous note spent:', {
-          txHash
-        });
-
         return { txHash };
 
       } catch (error) {
@@ -541,12 +472,9 @@
      */
     async checkBlockStatus(blockId) {
       try {
-        console.log('[AnonTxClient] 📍 checkBlockStatus:', { blockId });
-
         const response = await this.fetch(`${this.clReadApiUrl}/anon/blocks/${encodeURIComponent(blockId)}/status`);
 
         if (response.status === 404) {
-          console.log('[AnonTxClient] Block not found:', blockId);
           return { blockId, status: 'not_found', canSpend: false };
         }
 
@@ -555,7 +483,6 @@
         }
 
         const data = await response.json();
-        console.log('[AnonTxClient] ✅ Block status check:', data);
 
         return data;
       } catch (error) {
@@ -573,8 +500,6 @@
      * @returns {Promise<boolean>} true if block sealed, false if timeout
      */
     async waitForBlockSeal(blockId, maxWaitMs = 60000, pollIntervalMs = 2000) {
-      console.log('[AnonTxClient] 📍 waitForBlockSeal:', { blockId, maxWaitMs });
-
       const startTime = Date.now();
 
       while (Date.now() - startTime < maxWaitMs) {
@@ -582,11 +507,8 @@
           const { canSpend, status } = await this.checkBlockStatus(blockId);
 
           if (canSpend) {
-            console.log('[AnonTxClient] ✅ Block sealed!', { blockId, status });
             return true;
           }
-
-          console.log('[AnonTxClient] Block not yet sealed, waiting...', { blockId, status });
           await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
 
         } catch (error) {
@@ -609,12 +531,9 @@
      */
     async checkWalletRegistration(walletAddress) {
       try {
-        console.log('[AnonTxClient] 📍 checkWalletRegistration:', { walletAddress });
-
         const response = await this.fetch(`${this.clReadApiUrl}/wallets/${encodeURIComponent(walletAddress)}/registration`);
 
         if (response.status === 404) {
-          console.log('[AnonTxClient] Wallet not registered:', walletAddress);
           return { registered: false, role: null };
         }
 
@@ -623,11 +542,6 @@
         }
 
         const data = await response.json();
-        console.log('[AnonTxClient] ✅ Wallet registration check:', {
-          walletAddress,
-          registered: true,
-          role: data.registration?.role
-        });
 
         return {
           registered: true,
@@ -729,13 +643,6 @@
       // MUST match server's format with | separators
       const data = `${context}|${serial}|${encodedAmount}`;
 
-      console.log('[AnonTxClient] deriveAnonMessage:', {
-        context,
-        serialPrefix: serial.substring(0, 16) + '...',
-        encodedAmount,
-        dataPreview: data.substring(0, 50) + '...'
-      });
-
       // SHA-256 Hash
       const hash = await this.sha256Hash(data);
 
@@ -825,18 +732,11 @@
      * @returns {string} Signature (hex string)
      */
     unblindSignature(blindSignature, r, n) {
-      console.log('[AnonTxClient] 📍 unblindSignature: Starting...');
-      const startTime = Date.now();
-
       // Compute r^-1 mod n using Extended Euclidean Algorithm (O(log n))
-      console.log('[AnonTxClient] 📍 unblindSignature: Computing modular inverse...');
       const r_inv = this.modInverse(r, n);
-      console.log('[AnonTxClient] 📍 unblindSignature: modInverse completed in', Date.now() - startTime, 'ms');
 
       // Unblind: signature = (blindSignature × r^-1) mod n
       const signature = (blindSignature * r_inv) % n;
-
-      console.log('[AnonTxClient] ✅ unblindSignature: Completed in', Date.now() - startTime, 'ms');
 
       // Convert to hex string
       return signature.toString(16);
@@ -852,12 +752,6 @@
      * @returns {Promise<bigint>} Blind signature
      */
     async transferCLtoSH(clWallet, amount, blindedMessage, fingerprint = null) {
-      console.log('[AnonTxClient] 📍 transferCLtoSH: Starting CL → SH transfer...', {
-        clWalletAddress: clWallet.address,
-        amount: amount.toString(),
-        anonApiUrl: this.anonApiUrl
-      });
-
       const sodium = this.sodium;
       if (!sodium) {
         throw new Error(
@@ -890,13 +784,6 @@
       if (fingerprint) {
         payload.fingerprint = fingerprint;
       }
-
-      // POST /anon/mint
-      console.log('[AnonTxClient] 📍 transferCLtoSH: Calling POST /anon/mint...', {
-        endpoint: `${this.anonApiUrl}/mint`,
-        from: fromAddress,
-        amount: amount.toString()
-      });
 
       // Build X-Tx-* signature headers (Ed25519, canonical format)
       // Message: METHOD|PATH|NONCE|TIMESTAMP|SHA256(rawBody)
@@ -948,7 +835,6 @@
       }
 
       const mintResponse = await response.json();
-      console.log('[AnonTxClient] ✅ transferCLtoSH: Mint successful, received blind signature and block info');
 
       // Convert hex string to BigInt
       return {
@@ -1154,13 +1040,6 @@
 
       await this.saveSeeds(seedObj);
 
-      console.log('[FingerprintSeedManager] Seeds generated:', {
-        ratingRef,
-        domain,
-        seedCLtoSHPreview: seedCLtoSH.substring(0, 16) + '...',
-        seedSHtoDSPreview: seedSHtoDS.substring(0, 16) + '...'
-      });
-
       return seedObj;
     }
 
@@ -1224,13 +1103,6 @@
         seedObj.seedSHtoDS, 'SH_TO_DS', pairIndex
       );
 
-      console.log('[FingerprintSeedManager] Pair fingerprints generated:', {
-        ratingRef,
-        pairIndex,
-        fpCLtoSH: fingerprintCLtoSH.substring(0, 16) + '...',
-        fpSHtoDS: fingerprintSHtoDS.substring(0, 16) + '...'
-      });
-
       return { fingerprintCLtoSH, fingerprintSHtoDS };
     }
 
@@ -1268,14 +1140,6 @@
 
       seedObj.transactionPairs.push(pair);
       await this.saveSeeds(seedObj);
-
-      console.log('[FingerprintSeedManager] Transaction pair added:', {
-        ratingRef,
-        pairIndex,
-        reason,
-        fpCLtoSH: fingerprintCLtoSH.substring(0, 16) + '...',
-        fpSHtoDS: fingerprintSHtoDS.substring(0, 16) + '...'
-      });
 
       return pair;
     }
@@ -1317,10 +1181,6 @@
         seedObj.status = 'completed';
         seedObj.completedAt = Date.now();
         await this.saveSeeds(seedObj);
-
-        console.log('[FingerprintSeedManager] Seeds marked completed:', {
-          ratingRef
-        });
       }
     }
 
@@ -1348,7 +1208,6 @@
 
       if (deletedCount > 0) {
         await this.storage.set({ [this.STORAGE_KEY]: seeds });
-        console.log(`[FingerprintSeedManager] Cleaned up ${deletedCount} old seeds (>${maxAgeDays} days)`);
       }
 
       return deletedCount;
@@ -1369,7 +1228,6 @@
      */
     async clearAllSeeds() {
       await this.storage.remove([this.STORAGE_KEY]);
-      console.log('[FingerprintSeedManager] All seeds cleared');
     }
 
     /**

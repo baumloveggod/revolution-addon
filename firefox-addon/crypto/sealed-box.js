@@ -9,8 +9,6 @@
  * - Sender bleibt anonym (kein Sender-Fingerprint in Message)
  */
 
-console.log('[SealedBox] Script loading...');
-
 (function() {
   if (typeof window.SealedBox === 'undefined') {
     window.SealedBox = {};
@@ -20,7 +18,7 @@ console.log('[SealedBox] Script loading...');
   function debugLog(operation, data) {
     if (operation.includes('❌') || operation.includes('⚠️')) {
       const timestamp = new Date().toISOString();
-      console.log(`[${timestamp}] [SealedBox] ${operation}`, data);
+      console.error(`[${timestamp}] [SealedBox] ${operation}`, data);
 
       // Send to logging service if available
       if (typeof window.LogClient !== 'undefined' && window.LogClient.sendLog) {
@@ -118,5 +116,4 @@ console.log('[SealedBox] Script loading...');
     }
   };
 
-  console.log('[SealedBox] ✅ Script loaded successfully');
 })();

@@ -4,8 +4,8 @@
  */
 
 const LOGGING_SERVICE_URL = typeof process !== 'undefined' && process.env
-  ? (process.env.LOGGING_SERVICE_URL || 'http://192.168.178.130:4301')
-  : 'http://192.168.178.130:4301';
+  ? (process.env.LOGGING_SERVICE_URL || 'https://log.lenkenhoff.de')
+  : 'https://log.lenkenhoff.de';
 
 /**
  * Send a log to the logging service

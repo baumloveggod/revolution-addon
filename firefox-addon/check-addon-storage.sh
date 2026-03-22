@@ -36,7 +36,7 @@ echo "=== CHECKING SERVER DATABASE ==="
 echo ""
 
 # Check the messaging service database
-DB="/Users/andreaslenkenhoff/Documents/revolution/messaging-service/dev/messaging.sqlite"
+DB="/Volumes/1tb-dev/revolution/revolution_server/messaging-service/dev/messaging.sqlite"
 
 if [ ! -f "$DB" ]; then
   echo "❌ Database not found: $DB"

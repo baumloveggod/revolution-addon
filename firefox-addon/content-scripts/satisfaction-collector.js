@@ -358,7 +358,6 @@ class SatisfactionDataCollector {
       attention: new AttentionQualityMetric()
     };
 
-    console.log('[Revolution] Satisfaction metrics collector initialized');
   }
 
   /**
@@ -419,4 +418,3 @@ window.addEventListener('beforeunload', () => {
   }
 });
 
-console.log('[Revolution] Satisfaction collector script loaded');

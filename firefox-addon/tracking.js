@@ -277,7 +277,6 @@ class PageVisitTracker {
     this.setupEventListeners();
 
     this.initialized = true;
-    console.log('[tracking] Tracker initialisiert');
   }
 
   /**
@@ -331,7 +330,6 @@ class PageVisitTracker {
       });
     }, 30000);
 
-    console.log('[tracking] Event Listeners registriert');
   }
 
   /**
@@ -349,12 +347,6 @@ class PageVisitTracker {
     const session = new PageVisitSession(url, tabId, windowId);
     this.activeSessions.set(tabId, session);
 
-    console.log('[tracking] Neue Session gestartet:', {
-      tabId,
-      url: url.substring(0, 50),
-      sessionId: session.sessionId
-    });
-
     return session;
   }
 
@@ -368,13 +360,6 @@ class PageVisitTracker {
     const summary = session.end();
     this.completedSessions.push(summary);
     this.activeSessions.delete(tabId);
-
-    console.log('[tracking] Session beendet:', {
-      sessionId: summary.sessionId,
-      activeTime: summary.metrics.activeTime.valueSeconds,
-      passiveTime: summary.metrics.passiveTime.valueSeconds,
-      totalTime: summary.totalTimeSeconds
-    });
 
     // PERFORMANCE FIX: Save sessions asynchronously without blocking
     // This allows the function to return immediately
@@ -435,7 +420,6 @@ class PageVisitTracker {
 
     if (session) {
       session.activate();
-      console.log('[tracking] Session aktiviert:', tabId);
     }
   }
 
@@ -443,8 +427,6 @@ class PageVisitTracker {
    * Tab wurde geschlossen
    */
   handleTabClosed(tabId) {
-    console.log('[tracking] Tab geschlossen:', tabId);
-
     // PERFORMANCE FIX: Don't wait for session to end, run async
     this.endSession(tabId).catch(err => {
       console.error('[tracking] Failed to end session on tab close:', err);
@@ -463,8 +445,6 @@ class PageVisitTracker {
     if (newUrl.startsWith('about:') || newUrl.startsWith('chrome:')) {
       return;
     }
-
-    console.log('[tracking] Tab URL geändert:', { tabId, newUrl: newUrl.substring(0, 50) });
 
     // PERFORMANCE FIX: Don't await endSession to avoid blocking the main thread
     // The session completion callback will run asynchronously
@@ -504,7 +484,6 @@ class PageVisitTracker {
       const stored = await browser.storage.local.get([TRACKING_SESSION_KEY]);
       if (stored[TRACKING_SESSION_KEY]) {
         this.completedSessions = stored[TRACKING_SESSION_KEY] || [];
-        console.log('[tracking] Gespeicherte Sessions geladen:', this.completedSessions.length);
       }
     } catch (error) {
       console.error('[tracking] Fehler beim Laden der Sessions:', error);
@@ -520,7 +499,6 @@ class PageVisitTracker {
       await browser.storage.local.set({
         [TRACKING_SESSION_KEY]: this.completedSessions
       });
-      console.log('[tracking] Sessions gespeichert:', this.completedSessions.length);
     } catch (error) {
       console.error('[tracking] Fehler beim Speichern der Sessions:', error);
     }
@@ -550,7 +528,6 @@ class PageVisitTracker {
   async clearCompletedSessions() {
     this.completedSessions = [];
     await this.saveSessions();
-    console.log('[tracking] Abgeschlossene Sessions gelöscht');
   }
 
   /**

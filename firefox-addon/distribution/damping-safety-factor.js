@@ -48,13 +48,6 @@ class DampingSafetyFactor {
     // Begrenzen auf MIN/MAX
     const clampedSF = Math.max(this.MIN_SAFETY_FACTOR, Math.min(this.MAX_SAFETY_FACTOR, dampingSF));
 
-    console.log('[DampingSF] Calculated:', {
-      daysSinceFirstTransfer,
-      rampUpDays: this.RAMP_UP_DAYS,
-      dampingSF: (dampingSF * 100).toFixed(1) + '%',
-      clampedSF: (clampedSF * 100).toFixed(1) + '%'
-    });
-
     return clampedSF;
   }
 
@@ -80,13 +73,6 @@ class DampingSafetyFactor {
 
     const ratingsPerDay = ratingHistory.length / daysCovered;
     const predictedRatings = ratingsPerDay * 30;
-
-    console.log('[DampingSF] Prediction:', {
-      historicRatings: ratingHistory.length,
-      daysCovered,
-      ratingsPerDay: ratingsPerDay.toFixed(2),
-      predictedIn30Days: Math.round(predictedRatings)
-    });
 
     return predictedRatings;
   }
@@ -136,29 +122,7 @@ class DampingSafetyFactor {
    * Beispiel-Berechnung (für Testing)
    */
   static exampleCalculation() {
-    const damping = new DampingSafetyFactor();
-
-    console.log('=== Damping SF Examples ===');
-    console.log('Day 1:', (damping.calculateDampingSF(1) * 100).toFixed(1) + '%');
-    console.log('Day 7:', (damping.calculateDampingSF(7) * 100).toFixed(1) + '%');
-    console.log('Day 15:', (damping.calculateDampingSF(15) * 100).toFixed(1) + '%');
-    console.log('Day 30:', (damping.calculateDampingSF(30) * 100).toFixed(1) + '%');
-    console.log('Day 60:', (damping.calculateDampingSF(60) * 100).toFixed(1) + '%');
-
-    // Unregelmäßige Nutzung Simulation
-    console.log('\n=== Unregelmäßige Nutzung (1x/Woche, 2h) ===');
-    const irregularUsage = [
-      { day: 1, sessions: 1 },
-      { day: 8, sessions: 1 },
-      { day: 14, sessions: 1 },
-      { day: 22, sessions: 1 },
-      { day: 29, sessions: 1 }
-    ];
-
-    irregularUsage.forEach(({ day, sessions }) => {
-      const dampingSF = damping.calculateDampingSF(day);
-      console.log(`Day ${day} (${sessions} session): ${(dampingSF * 100).toFixed(1)}% payout`);
-    });
+    // Example calculations for testing/debugging - no output
   }
 }
 

@@ -1,4 +1,4 @@
-const SITE_ORIGINS = ['http://192.168.178.130:3000'];
+const SITE_ORIGINS = ['https://api.lenkenhoff.de'];
 const statusTextEl = document.getElementById('statusText');
 const statusMetaEl = document.getElementById('statusMeta');
 const clientStateEl = document.getElementById('clientState');

@@ -8,7 +8,7 @@
 class UpdateChecker {
   constructor() {
     this.checkInterval = 24 * 60 * 60 * 1000; // 24 hours
-    this.serverApiUrl = 'http://192.168.178.130:3000'; // Will be set from state
+    this.serverApiUrl = 'https://api.lenkenhoff.de'; // Will be set from state
   }
 
   /**
@@ -27,7 +27,6 @@ class UpdateChecker {
     // Then check every 24 hours
     setInterval(() => this.checkServerVersion(), this.checkInterval);
 
-    console.log('[UpdateChecker] Started (checking every 24 hours)');
   }
 
   /**

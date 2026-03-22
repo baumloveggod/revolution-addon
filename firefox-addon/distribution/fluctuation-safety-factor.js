@@ -35,7 +35,6 @@ class FluctuationSafetyFactor {
   calculateFluctuationSF(factorHistory, daysSinceStart) {
     // Regel 1: Erst ab Tag 10 aktiv
     if (daysSinceStart < this.ACTIVATION_DAY) {
-      console.log('[FluctuationSF] Not active yet (day ' + daysSinceStart + ' < ' + this.ACTIVATION_DAY + ')');
       return 1.0;  // Kein Einfluss vor Tag 10
     }
 
@@ -70,16 +69,6 @@ class FluctuationSafetyFactor {
     const range = max - min;
     const fluctuationRatio = mean > 0 ? range / mean : 0;
 
-    console.log('[FluctuationSF] Statistics:', {
-      daysSinceStart,
-      dataPoints: factors.length,
-      min: min.toExponential(4),
-      max: max.toExponential(4),
-      mean: mean.toExponential(4),
-      range: range.toExponential(4),
-      fluctuationRatio: (fluctuationRatio * 100).toFixed(2) + '%'
-    });
-
     // Berechne Safety Factor
     // Je höher die Schwankung, desto niedriger der SF
     const penalty = fluctuationRatio * this.CONSERVATIVITY_FACTOR;
@@ -87,12 +76,6 @@ class FluctuationSafetyFactor {
 
     // Begrenzen auf MIN/MAX
     safetyFactor = Math.max(this.MIN_SAFETY_FACTOR, Math.min(this.MAX_SAFETY_FACTOR, safetyFactor));
-
-    console.log('[FluctuationSF] Calculated:', {
-      fluctuationRatio: (fluctuationRatio * 100).toFixed(2) + '%',
-      penalty: (penalty * 100).toFixed(2) + '%',
-      safetyFactor: (safetyFactor * 100).toFixed(1) + '%'
-    });
 
     return safetyFactor;
   }
@@ -131,13 +114,6 @@ class FluctuationSafetyFactor {
     ).filter(f => !isNaN(f) && f > 0);
 
     const pessimisticFactor = Math.min(...factors);
-
-    console.log('[FluctuationSF] Pessimistic factor:', {
-      lookbackDays,
-      dataPoints: factors.length,
-      min: pessimisticFactor.toExponential(4),
-      max: Math.max(...factors).toExponential(4)
-    });
 
     return pessimisticFactor;
   }

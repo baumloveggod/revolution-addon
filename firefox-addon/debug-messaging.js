@@ -36,7 +36,7 @@
   if (userToken && groupId.messaging_group_id) {
     console.log('\n3. Checking server registration...');
     try {
-      const response = await fetch(`http://192.168.178.130:4200/keys?groupId=${groupId.messaging_group_id}`, {
+      const response = await fetch(`https://msg.lenkenhoff.de/keys?groupId=${groupId.messaging_group_id}`, {
         headers: {
           'Authorization': `Bearer ${userToken}`
         }

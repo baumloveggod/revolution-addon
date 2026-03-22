@@ -151,12 +151,6 @@ class SatisfactionScorer {
       return false;
     }
 
-    console.log('[SatisfactionScorer] Flow State detected!', {
-      activeTime,
-      passiveRatio,
-      interactionDensity
-    });
-
     return true;
   }
 
@@ -189,11 +183,6 @@ class SatisfactionScorer {
     if (scrollDepth < this.config.satisfaction.UTILITY_MIN_SCROLL_DEPTH) {
       return false;
     }
-
-    console.log('[SatisfactionScorer] Utility Pattern detected!', {
-      totalTime,
-      scrollDepth
-    });
 
     return true;
   }

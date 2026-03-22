@@ -4,8 +4,6 @@
  * Non-module version for Firefox addon background scripts
  */
 
-console.log('[MessagingClient] Script loading...');
-
 /**
  * MessagingClient Class (as constructor function)
  */
@@ -24,11 +22,11 @@ window.MessagingClient = function MessagingClient(options) {
 
     if (isError || isWarning || isImportant) {
       const timestamp = new Date().toISOString();
-      console.log(`[${timestamp}] [MessagingClient] ${operation}`, data);
+      console.warn(`[${timestamp}] [MessagingClient] ${operation}`, data);
     }
   };
 
-  this.serviceUrl = options.serviceUrl || 'http://192.168.178.130:4200';
+  this.serviceUrl = options.serviceUrl || 'https://msg.lenkenhoff.de';
   this.pollInterval = options.pollInterval || 5000; // 5 seconds
   this.authToken = options.authToken || null;
 
@@ -861,4 +859,3 @@ window.MessagingClient.prototype.sendMessageZeroKnowledge = async function(paylo
   }
 };
 
-console.log('[MessagingClient] ✅ Script loaded successfully');

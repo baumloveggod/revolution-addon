@@ -6,7 +6,7 @@
  */
 
 class EntityResolver {
-  constructor(serverApiUrl = 'http://192.168.178.130:3000') {
+  constructor(serverApiUrl = 'https://entity.lenkenhoff.de') {
     this.serverApiUrl = serverApiUrl;
   }
 
@@ -28,8 +28,6 @@ class EntityResolver {
 
     try {
       const url = `${this.serverApiUrl}/entity/resolve?domain=${encodeURIComponent(domain)}`;
-
-      console.log('[EntityResolver] 📤 Resolving entity for domain:', { domain, url });
 
       const response = await fetch(url, {
         method: 'GET',
@@ -53,13 +51,6 @@ class EntityResolver {
 
       const data = await response.json();
 
-      console.log('[EntityResolver] ✅ Entity resolved:', {
-        domain,
-        kind: data.kind,
-        wallet_address: data.wallet_address?.substring(0, 10) + '...',
-        hasTrackingRules: !!data.tracking_rules
-      });
-
       return data;
     } catch (error) {
       console.error('[EntityResolver] ❌ Failed to resolve entity:', error.message);
@@ -77,16 +68,14 @@ class EntityResolver {
    */
   async getAndCacheWalletAddress(domain, userToken, storage = browser.storage.local) {
     // Prüfe ob bereits gecacht
-    const data = await storage.get(['rev_domain_wallets']);
+    const data = await storage.get(['rev_domain_wallets', 'rev_new_wallets']);
     const domainWallets = data.rev_domain_wallets || {};
+    const newWallets = data.rev_new_wallets || {};
 
     if (domainWallets[domain]) {
-      console.log('[EntityResolver] 💾 Using cached wallet address for:', domain);
-      return domainWallets[domain];
+      const isNewWallet = this._isWalletStillNew(newWallets[domain]);
+      return { address: domainWallets[domain], isNewWallet };
     }
-
-    // Nicht gecacht → von API holen
-    console.log('[EntityResolver] 🌐 Fetching wallet address from API for:', domain);
 
     const entity = await this.resolveEntity(domain, userToken);
 
@@ -102,11 +91,28 @@ class EntityResolver {
     // In Cache speichern (Flow-tagged format: DS::0x... or OR::0x...)
     const walletFlowAddress = entity.wallet_flow_address;
     domainWallets[domain] = walletFlowAddress;
-    await storage.set({ rev_domain_wallets: domainWallets });
 
-    console.log('[EntityResolver] 💾 Wallet address cached for:', domain);
+    // Wenn neues Wallet: Erstellungszeitpunkt merken für Folgetransaktionen
+    const isNewWallet = entity.is_new_wallet === true;
+    if (isNewWallet) {
+      newWallets[domain] = Date.now();
+    }
 
-    return walletFlowAddress;
+    await storage.set({ rev_domain_wallets: domainWallets, rev_new_wallets: newWallets });
+
+    return { address: walletFlowAddress, isNewWallet };
+  }
+
+  /**
+   * Prüft ob ein Wallet noch als "neu" gilt (innerhalb der New-Wallet-Schutzperiode).
+   * Schutzperiode: 30 Minuten nach erster Registrierung.
+   * @param {number|undefined} createdAt - Timestamp aus rev_new_wallets
+   * @returns {boolean}
+   */
+  _isWalletStillNew(createdAt) {
+    if (!createdAt) return false;
+    const NEW_WALLET_PROTECTION_MS = 30 * 60 * 1000; // 30 minutes
+    return (Date.now() - createdAt) < NEW_WALLET_PROTECTION_MS;
   }
 
   /**
@@ -133,8 +139,6 @@ class EntityResolver {
     delete domainWallets[domain];
 
     await storage.set({ rev_domain_wallets: domainWallets });
-
-    console.log('[EntityResolver] 🗑️ Cache cleared for:', domain);
   }
 
   /**
@@ -144,7 +148,6 @@ class EntityResolver {
    */
   async clearAllCache(storage = browser.storage.local) {
     await storage.set({ rev_domain_wallets: {} });
-    console.log('[EntityResolver] 🗑️ All wallet cache cleared');
   }
 }
 

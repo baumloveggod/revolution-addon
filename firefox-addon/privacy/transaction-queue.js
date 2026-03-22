@@ -71,13 +71,6 @@ class TransactionQueue {
     // In Queue einfügen
     this.queue.push(transaction);
 
-    console.log('[TransactionQueue] Transaction queued:', {
-      walletAddress: transaction.walletAddress?.substring(0, 10) + '...',
-      domain: transaction.domain,
-      tokens: transaction.tokens.toString(),
-      queueSize: this.queue.length
-    });
-
     // Batch-Logik triggern
     this.triggerBatchIfNeeded();
   }
@@ -87,10 +80,6 @@ class TransactionQueue {
    * Die Privacy liegt in Phase 2: Spend erst nach Block-Versiegelung.
    */
   triggerBatchIfNeeded() {
-    console.log('[TransactionQueue] Minting immediately (Phase 2 block hold active):', {
-      queueSize: this.queue.length
-    });
-
     // Sofort ausführen (im nächsten Event Loop Tick für Async-Safety)
     setTimeout(() => {
       this.executeBatch();
@@ -102,13 +91,8 @@ class TransactionQueue {
    */
   async executeBatch() {
     if (this.queue.length === 0) {
-      console.log('[TransactionQueue] No transactions to execute');
       return;
     }
-
-    console.log('[TransactionQueue] Executing batch:', {
-      transactionCount: this.queue.length
-    });
 
     // 1. Kopiere Queue
     const batch = [...this.queue];
@@ -123,8 +107,6 @@ class TransactionQueue {
     for (const transaction of batch) {
       await this.executeTransaction(transaction);
     }
-
-    console.log('[TransactionQueue] Batch execution complete');
   }
 
   /**
@@ -141,12 +123,6 @@ class TransactionQueue {
    */
   async executeTransaction(transaction) {
     try {
-      console.log('[TransactionQueue] Executing anonymous transaction:', {
-        walletAddress: transaction.walletAddress?.substring(0, 10) + '...',
-        tokens: transaction.tokens.toString(),
-        domain: transaction.domain
-      });
-
       // ZERO-KNOWLEDGE GUARD: Check if device is properly linked before executing transaction
       if (!this._isDeviceLinked()) {
         console.warn('[TransactionQueue] ⚠️ Device not linked - transaction blocked', {
@@ -159,7 +135,6 @@ class TransactionQueue {
 
       // NEW: Check for dependencies (including auto-injection from global scope)
       if (!this._checkDependencies()) {
-        console.log('[TransactionQueue] Wallet not ready, queueing transaction for retry');
         this._queuePendingTransaction(transaction);
         return;
       }
@@ -168,7 +143,6 @@ class TransactionQueue {
       if (!this.walletManager || !this.anonClient) {
         if (this.onExecute) {
           await this.onExecute(transaction);
-          console.log('[TransactionQueue] Transaction executed via callback');
           return;
         } else {
           console.warn('[TransactionQueue] No wallet dependencies or callback set');
@@ -177,7 +151,6 @@ class TransactionQueue {
       }
 
       // 1. Get CL Wallet with retry mechanism
-      console.log('[TransactionQueue] 📍 Step 1: Getting CL Wallet...');
       const clWallet = await this._getClWalletWithRetry();
 
       if (!clWallet) {
@@ -203,21 +176,10 @@ class TransactionQueue {
         throw new Error(`CL wallet not initialized after ${this.retryConfig.maxRetries} retries. Possible causes: ${errorContext.possibleCauses.join(', ')}. Check console for diagnostic info.`);
       }
 
-      console.log('[TransactionQueue] ✅ Step 1: CL Wallet loaded:', {
-        address: clWallet.address,
-        hasPrivateKey: !!clWallet.privateKey,
-        hasPublicKey: !!clWallet.publicKey
-      });
-
       // 2. Check Balance
-      console.log('[TransactionQueue] 📍 Step 2: Checking balance...');
       let balance;
       try {
         balance = await this.walletManager.getBalance(clWallet.address);
-        console.log('[TransactionQueue] ✅ Step 2: Balance retrieved:', {
-          balance: balance.toString(),
-          clWalletAddress: clWallet.address
-        });
       } catch (error) {
         // Central Ledger API ist nicht erreichbar
         if (error.code === 'CL_API_UNREACHABLE' || error.code === 'CL_API_CONNECTION_FAILED') {
@@ -232,19 +194,12 @@ class TransactionQueue {
       }
 
       // 2b. Prüfe und setze ersten BA→CL Transfer Timestamp (für Zeit-Dämpfung)
-      console.log('[TransactionQueue] Checking BA transfer detection:', {
-        hasTranslationFactorTracker: !!this.translationFactorTracker,
-        hasWalletManager: !!this.walletManager,
-        clWalletAddress: clWallet.address
-      });
-
       if (this.translationFactorTracker && this.walletManager) {
         try {
-          const detected = await this.walletManager.detectAndRecordFirstBaTransfer(
+          await this.walletManager.detectAndRecordFirstBaTransfer(
             clWallet.address,
             this.translationFactorTracker
           );
-          console.log('[TransactionQueue] BA transfer detection result:', detected);
         } catch (error) {
           // Fehler nicht weiterwerfen, nur loggen
           console.warn('[TransactionQueue] Failed to detect BA transfer:', error.message);
@@ -264,7 +219,6 @@ class TransactionQueue {
 
       // 3. PRE-VALIDATION: Check if SH→DS spend will be possible BEFORE minting
       // This prevents tokens from getting stuck in SH pool
-      console.log('[TransactionQueue] 📍 Step 3: Pre-validating SH→DS destination...');
 
       // 3a. Check for pending wallet address (local validation)
       if (transaction.walletAddress?.startsWith('pending:')) {
@@ -280,7 +234,6 @@ class TransactionQueue {
       }
 
       // 3c. Verify DS wallet is registered in Central Ledger (remote validation)
-      console.log('[TransactionQueue] 📍 Step 3c: Verifying DS wallet registration in Central Ledger...');
       try {
         const registrationCheck = await this.anonClient.checkWalletRegistration(transaction.walletAddress);
         if (!registrationCheck.registered) {
@@ -289,10 +242,6 @@ class TransactionQueue {
           });
           throw new Error(`DS wallet not registered in Central Ledger: ${transaction.walletAddress}. Mint aborted to prevent tokens stuck in SH pool.`);
         }
-        console.log('[TransactionQueue] ✅ Step 3c: DS wallet is registered:', {
-          walletAddress: transaction.walletAddress,
-          role: registrationCheck.role
-        });
       } catch (error) {
         // If it's our own error, re-throw it
         if (error.message.includes('not registered')) {
@@ -302,11 +251,6 @@ class TransactionQueue {
         console.warn('[TransactionQueue] ⚠️ Step 3c: Could not verify DS wallet registration (network issue?):', error.message);
       }
 
-      console.log('[TransactionQueue] ✅ Step 3: Pre-validation passed, destination is valid:', {
-        destinationWallet: transaction.walletAddress,
-        isValidDestination: true
-      });
-
       // 3.5. Generiere Fingerprints für dieses Transaktionspaar VOR dem Mint
       const seedManager = new FingerprintSeedManager({ storage: browser.storage.local });
       const { fingerprintCLtoSH, fingerprintSHtoDS } =
@@ -315,35 +259,23 @@ class TransactionQueue {
           transaction.pairIndex
         );
 
-      console.log('[TransactionQueue] Transaction pair fingerprints generated:', {
-        ratingRef: transaction.ratingRef,
-        pairIndex: transaction.pairIndex,
-        fpCLtoSH: fingerprintCLtoSH.substring(0, 16) + '...',
-        fpSHtoDS: fingerprintSHtoDS.substring(0, 16) + '...'
-      });
+      // 3.7. New-wallet timing protection: delay mint to break DS registration correlation
+      if (transaction.isNewWallet) {
+        const minDelayMs = 2 * 60 * 1000;   // 2 minutes
+        const maxDelayMs = 15 * 60 * 1000;  // 15 minutes
+        const delayMs = minDelayMs + Math.floor(Math.random() * (maxDelayMs - minDelayMs));
+        await this._sleep(delayMs);
+      }
 
       // 4. Mint Anonymous Note (CL → SH) — Phase 1
-      console.log('[TransactionQueue] 📍 Step 4 (Phase 1): Minting anonymous note (CL → SH)...', {
-        clWalletAddress: clWallet.address,
-        tokensNeeded: tokensNeeded.toString(),
-        hasPrivateKey: !!clWallet.privateKey,
-        fingerprintCLtoSH: fingerprintCLtoSH.substring(0, 16) + '...'
-      });
-
       const { serial, signature, amount, blockId } = await this.anonClient.mintAnonNote(
         clWallet,
         tokensNeeded,
         fingerprintCLtoSH
       );
 
-      console.log('[TransactionQueue] ✅ Step 4: Mint complete, buffering spend until block sealed:', {
-        serialPrefix: serial?.substring(0, 20) + '...',
-        amount: amount?.toString(),
-        blockId
-      });
-
       // 5. Buffer the spend — it will be executed in Phase 2 after block is sealed
-      this.mintBuffer.push({
+      const mintEntry = {
         serial,
         signature,
         amount,
@@ -355,14 +287,15 @@ class TransactionQueue {
         _ratingRef: transaction.ratingRef,
         _pairIndex: transaction.pairIndex,
         _fingerprintCLtoSH: fingerprintCLtoSH
+      };
+      this.mintBuffer.push(mintEntry);
+
+      // 5a. Continuously stream mint entry to website for device-loss recovery
+      this._streamMintEntryToWebsite(mintEntry).catch(err => {
+        console.warn('[TransactionQueue] ⚠️ Failed to stream mint entry to website (non-blocking):', err.message);
       });
 
       this._startBlockPollingIfNeeded();
-
-      console.log('[TransactionQueue] Phase 1 complete. Spend held until block sealed.', {
-        bufferSize: this.mintBuffer.length,
-        blockId
-      });
 
     } catch (error) {
       console.error('[TransactionQueue] Transaction execution failed:', error);
@@ -377,18 +310,10 @@ class TransactionQueue {
         const backoffMultiplier = Math.pow(2, transaction.attempts - 1);
         const delay = baseDelay * backoffMultiplier;
 
-        console.log('[TransactionQueue] Retry scheduled:', {
-          attempt: transaction.attempts,
-          delay: delay / 1000 + 's'
-        });
-
         // Re-queue transaction
         transaction.queuedAt = Date.now() + delay;
         this.queue.push(transaction);
 
-      } else {
-        // Max retries erreicht → Failed
-        console.error('[TransactionQueue] Transaction failed after 3 attempts');
       }
 
       throw error;
@@ -408,10 +333,6 @@ class TransactionQueue {
     if (this.spendTimer) return; // already polling
 
     const POLL_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
-
-    console.log('[TransactionQueue] Phase 2: Starting block polling (every 10 min):', {
-      bufferSize: this.mintBuffer.length
-    });
 
     this.spendTimer = setInterval(() => {
       this._pollSealedBlocks();
@@ -434,16 +355,9 @@ class TransactionQueue {
     // Collect unique blockIds
     const blockIds = [...new Set(this.mintBuffer.map(e => e.blockId).filter(Boolean))];
 
-    console.log('[TransactionQueue] Phase 2: Polling block status:', {
-      blockIds,
-      bufferSize: this.mintBuffer.length
-    });
-
     for (const blockId of blockIds) {
       try {
         const { canSpend, status } = await this.anonClient.checkBlockStatus(blockId);
-
-        console.log('[TransactionQueue] Block status:', { blockId, status, canSpend });
 
         if (canSpend) {
           // Extract all entries for this block
@@ -470,7 +384,6 @@ class TransactionQueue {
     if (this.spendTimer) {
       clearInterval(this.spendTimer);
       this.spendTimer = null;
-      console.log('[TransactionQueue] Phase 2: Block polling stopped (buffer empty)');
     }
   }
 
@@ -485,11 +398,6 @@ class TransactionQueue {
     // in random order, unlinked from the earlier N mints.
     this.shuffleArray(due);
 
-    console.log('[TransactionQueue] Phase 2: Executing shuffled spend batch for sealed block:', {
-      blockId,
-      count: due.length
-    });
-
     for (const entry of due) {
       try {
         const { txHash: clTxHash } = await this.anonClient.spendAnonNote(
@@ -499,11 +407,6 @@ class TransactionQueue {
           entry.destination,
           entry.fingerprintSHtoDS
         );
-
-        console.log('[TransactionQueue] ✅ Phase 2: Spend completed:', {
-          clTxHash,
-          destination: entry.destination
-        });
 
         // Post-spend bookkeeping
         const dsTxHash = clTxHash;
@@ -525,7 +428,6 @@ class TransactionQueue {
       }
     }
 
-    console.log('[TransactionQueue] Phase 2 batch done.', { remaining: this.mintBuffer.length });
   }
 
   // DEPRECATED: sendRatingMessage() has been moved to background.js
@@ -682,7 +584,6 @@ class TransactionQueue {
     );
 
     if (recipients.length === 0) {
-      console.log('[TransactionQueue] No other devices to send to (only website in group)');
       return { success: true, skipped: true, reason: 'No other devices' };
     }
 
@@ -755,16 +656,12 @@ class TransactionQueue {
       const clWallet = await this.walletManager.getLocalWallet();
 
       if (clWallet) {
-        if (attempt > 0) {
-          console.log(`[TransactionQueue] ✅ CL wallet retrieved after ${attempt} retries`);
-        }
         return clWallet;
       }
 
       // If this is not the last attempt, wait before retrying
       if (attempt < maxRetries) {
         const delayMs = initialDelayMs * Math.pow(backoffMultiplier, attempt);
-        console.log(`[TransactionQueue] ⏳ CL wallet not found (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delayMs}ms...`);
         await this._sleep(delayMs);
       }
     }
@@ -800,35 +697,24 @@ class TransactionQueue {
 
     // Check 1: If device is currently linking, consider it as "not yet ready" (not an error)
     if (state.deviceStatus === 'linking') {
-      console.log('[TransactionQueue] Device is currently linking, transaction will be queued');
       return false;
     }
 
     // Check 2: Device must exist
     if (!state.device) {
-      console.log('[TransactionQueue] Device not registered');
       return false;
     }
 
     // Check 3: Device status must be 'linked'
     if (state.deviceStatus !== 'linked') {
-      console.log('[TransactionQueue] Device status is not linked:', state.deviceStatus);
       return false;
     }
 
     // Check 4: Must have wallet address (from website-signed registration)
     const walletAddress = state.device.walletAddress;
     if (!walletAddress) {
-      console.log('[TransactionQueue] No wallet address in device registration');
       return false;
     }
-
-    console.log('[TransactionQueue] ✅ Device is linked and ready:', {
-      clientId: state.device.clientId || 'N/A (ADDRESS_UPDATE)',
-      walletAddress: walletAddress.substring(0, 10) + '...',
-      deviceStatus: state.deviceStatus,
-      source: state.device.source || 'unknown'
-    });
 
     return true;
   }
@@ -848,7 +734,6 @@ class TransactionQueue {
       this.walletManager = window._walletManager;
       this.anonClient = window._anonClient;
       this.messagingClient = window.MessagingIntegration?.getClient();
-      console.log('[TransactionQueue] Wallet dependencies auto-injected from global scope');
       return true;
     }
 
@@ -871,12 +756,6 @@ class TransactionQueue {
 
     transaction.pendingSince = Date.now();
     this.pendingQueue.push(transaction);
-
-    console.log('[TransactionQueue] Transaction queued pending:', {
-      queueSize: this.pendingQueue.length,
-      domain: transaction.domain,
-      reason: transaction.pendingReason
-    });
   }
 
   /**
@@ -887,8 +766,6 @@ class TransactionQueue {
       return;
     }
 
-    console.log('[TransactionQueue] Processing pending transactions:', this.pendingQueue.length);
-
     const pending = [...this.pendingQueue];
     this.pendingQueue = [];
 
@@ -897,20 +774,10 @@ class TransactionQueue {
       // This fixes race condition where transactions were queued before EntityResolver was ready
       if (transaction.walletAddress?.startsWith('pending:') && this.distributionEngine) {
         const domain = transaction.domain || transaction.walletAddress.replace('pending:', '');
-        console.log('[TransactionQueue] 🔄 Re-resolving wallet address for pending transaction:', {
-          oldAddress: transaction.walletAddress,
-          domain: domain
-        });
-
         try {
           const resolvedAddress = await this.distributionEngine.getWalletAddressForDomain(domain);
 
           if (!resolvedAddress.startsWith('pending:')) {
-            console.log('[TransactionQueue] ✅ Wallet address resolved successfully:', {
-              domain: domain,
-              oldAddress: transaction.walletAddress,
-              newAddress: resolvedAddress
-            });
             transaction.walletAddress = resolvedAddress;
           } else {
             console.warn('[TransactionQueue] ⚠️ Wallet address still pending, will retry later:', {
@@ -951,11 +818,6 @@ class TransactionQueue {
    */
   _checkPendingQueue() {
     if (this.pendingQueue.length > 0) {
-      console.log('[TransactionQueue] Watchdog: Pending transactions detected:', {
-        count: this.pendingQueue.length,
-        oldestAge: Date.now() - this.pendingQueue[0].pendingSince
-      });
-      // Check both device linking AND wallet dependencies
       if (this._isDeviceLinked() && this._checkDependencies()) {
         this.processPendingQueue();
       }
@@ -974,19 +836,93 @@ class TransactionQueue {
     this.translationFactorTracker = deps.translationFactorTracker;
     this.distributionEngine = deps.distributionEngine;
 
-    console.log('[TransactionQueue] Dependencies injected:', {
-      hasWalletManager: !!this.walletManager,
-      hasAnonClient: !!this.anonClient,
-      hasMessagingClient: !!this.messagingClient,
-      hasTranslationFactorTracker: !!this.translationFactorTracker,
-      hasDistributionEngine: !!this.distributionEngine
-    });
-
     // NEW: Process any pending transactions
     if (this.pendingQueue.length > 0) {
-      console.log('[TransactionQueue] Processing pending queue after dependency injection');
       this.processPendingQueue();
     }
+  }
+
+  /**
+   * Streams a mint buffer entry to the website immediately after Phase 1.
+   * The website stores serial+signature+destination encrypted, so it can execute
+   * the SH→DS spend if this device is lost before Phase 2 completes.
+   *
+   * Non-blocking — caller must catch errors.
+   *
+   * @param {Object} entry - mintBuffer entry (serial, signature, amount, destination, ...)
+   * @private
+   */
+  async _streamMintEntryToWebsite(entry) {
+    if (!this.messagingClient) {
+      console.warn('[TransactionQueue] Cannot stream mint entry: no messagingClient');
+      return;
+    }
+
+    const websitePublicKey = await this._getWebsiteMessagingPublicKey();
+    if (!websitePublicKey) {
+      console.warn('[TransactionQueue] Cannot stream mint entry: website public key not found');
+      return;
+    }
+
+    // Only transmit what the website needs to execute the spend.
+    // Do NOT include _seedManager (non-serializable) or internal metadata.
+    const payload = {
+      serial: entry.serial,
+      signature: entry.signature,
+      amount: entry.amount?.toString(),
+      destination: entry.destination,
+      fingerprintSHtoDS: entry.fingerprintSHtoDS,
+      blockId: entry.blockId,
+      ratingRef: entry._ratingRef,
+      pairIndex: entry._pairIndex,
+      sentAt: Date.now()
+    };
+
+    await this._sendToWebsiteOnly({ type: 'mint_buffer_entry', ...payload }, websitePublicKey);
+  }
+
+  /**
+   * Sends DEVICE_HANDOFF message to website: remaining queue + any leftover mintBuffer.
+   * Called on graceful device exit so website takes over immediately.
+   */
+  async sendDeviceHandoff() {
+    if (!this.messagingClient) {
+      console.warn('[TransactionQueue] Cannot send handoff: no messagingClient');
+      return;
+    }
+
+    const websitePublicKey = await this._getWebsiteMessagingPublicKey();
+    if (!websitePublicKey) {
+      console.warn('[TransactionQueue] Cannot send handoff: website public key not found');
+      return;
+    }
+
+    const queueSnapshot = this.queue.map(tx => ({
+      ...tx,
+      tokens: tx.tokens?.toString(),
+      originalTokens: tx.originalTokens?.toString()
+    }));
+
+    const mintBufferSnapshot = this.mintBuffer.map(entry => ({
+      serial: entry.serial,
+      signature: entry.signature,
+      amount: entry.amount?.toString(),
+      destination: entry.destination,
+      fingerprintSHtoDS: entry.fingerprintSHtoDS,
+      blockId: entry.blockId,
+      ratingRef: entry._ratingRef,
+      pairIndex: entry._pairIndex
+    }));
+
+    const payload = {
+      type: 'device_handoff',
+      queue: queueSnapshot,
+      mintBuffer: mintBufferSnapshot,
+      sentAt: Date.now()
+    };
+
+    await this._sendToWebsiteOnly(payload, websitePublicKey);
+
   }
 
   /**
@@ -1028,7 +964,6 @@ class TransactionQueue {
     if (this.watchdogTimer) {
       clearInterval(this.watchdogTimer);
       this.watchdogTimer = null;
-      console.log('[TransactionQueue] Watchdog timer stopped');
     }
     if (this.batchTimer) {
       clearTimeout(this.batchTimer);
@@ -1090,10 +1025,6 @@ class TransactionQueue {
       tokens: BigInt(tx.tokens),
       originalTokens: tx.originalTokens ? BigInt(tx.originalTokens) : undefined
     }));
-
-    console.log('[TransactionQueue] Queue loaded:', {
-      transactionCount: this.queue.length
-    });
 
     // Trigger Batch falls Queue gefüllt ist
     if (this.queue.length > 0) {

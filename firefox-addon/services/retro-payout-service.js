@@ -35,11 +35,8 @@ class RetroPayoutService {
    */
   start() {
     if (this.intervalId) {
-      console.log('[RetroPayoutService] Already running');
       return;
     }
-
-    console.log(`[RetroPayoutService] Starting (check every ${this.CHECK_INTERVAL_HOURS}h)...`);
 
     // Initiale Prüfung (nach 5 Minuten, um System-Start nicht zu blockieren)
     setTimeout(() => {
@@ -55,8 +52,6 @@ class RetroPayoutService {
         console.error('[RetroPayoutService] Periodic check failed:', err);
       });
     }, intervalMs);
-
-    console.log('[RetroPayoutService] ✅ Started');
   }
 
   /**
@@ -66,7 +61,6 @@ class RetroPayoutService {
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
-      console.log('[RetroPayoutService] Stopped');
     }
   }
 
@@ -77,21 +71,17 @@ class RetroPayoutService {
    */
   async checkAndCreatePayouts() {
     if (this.isRunning) {
-      console.log('[RetroPayoutService] Check already running, skipping...');
       return { checked: 0, payoutsCreated: 0, totalTokens: '0' };
     }
 
     this.isRunning = true;
     this.lastRunTimestamp = Date.now();
 
-    console.log('[RetroPayoutService] 🔄 Starting retro payout check...');
-
     try {
       // 1. Hole alle Ratings letzten 30 Tage
       const ratings = await this.tracker.getRatingsLast30Days();
 
       if (ratings.length === 0) {
-        console.log('[RetroPayoutService] No ratings found');
         return { checked: 0, payoutsCreated: 0, totalTokens: '0' };
       }
 
@@ -105,13 +95,6 @@ class RetroPayoutService {
       const userData = await this.distributionEngine.getUserData(this.storage);
       const factorHistory = await this.tracker.getFactorHistory(90);
       const prognosisSF = this.distributionEngine.prognosisModel.calculatePrognosisSF(factorHistory);
-
-      console.log('[RetroPayoutService] Current state:', {
-        ratingsCount: ratings.length,
-        transactionsCount: storedTransactions.length,
-        currentFactor: currentFactor.toString(),
-        prognosisSF: prognosisSF
-      });
 
       // 5. Prüfe jedes Rating auf Nachzahlungs-Bedarf
       let payoutsCreated = 0;
@@ -192,25 +175,8 @@ class RetroPayoutService {
       // 5. Differenz berechnen
       const differenz = sollTokens - istTokensSum;
 
-      console.log('[RetroPayoutService] Rating check:', {
-        ratingRef: rating.ratingRef.substring(0, 12) + '...',
-        domain: rating.domain,
-        score: rating.score,
-        sollTokens: sollTokens.toString(),
-        istTokensSum: istTokensSum.toString(),
-        threshold: threshold.toString(),
-        differenz: differenz.toString(),
-        needsRetroPayment,
-        meetsMinimum: differenz >= this.MIN_PAYOUT_TOKENS
-      });
-
       // 6. Erstelle Nachzahlung wenn Bedingungen erfüllt
       if (needsRetroPayment && differenz >= this.MIN_PAYOUT_TOKENS) {
-        console.log('[RetroPayoutService] 💰 Creating retro payout:', {
-          ratingRef: rating.ratingRef.substring(0, 12) + '...',
-          differenz: differenz.toString()
-        });
-
         // Erstelle Korrektur-Transaktion über TransactionCorrector
         await this.createCorrectionTransaction(
           rating,
@@ -259,11 +225,6 @@ class RetroPayoutService {
    * Erstellt eine Korrektur-Transaktion (Nachzahlung)
    */
   async createCorrectionTransaction(rating, existingTxs, sollTokens, istTokensSum, differenz, currentFactor, prognosisSF) {
-    console.log('[RetroPayoutService] Creating correction transaction...', {
-      ratingRef: rating.ratingRef.substring(0, 12) + '...',
-      differenz: differenz.toString()
-    });
-
     // Pair Index = Anzahl bisheriger Transaktionen
     const pairIndex = existingTxs.length;
 
@@ -316,8 +277,11 @@ class RetroPayoutService {
 
     // Queue für Blockchain-Ausführung (via PrivacyLayer)
     if (standardizedDifferenz > 0n) {
+      const { address: _walletAddr, isNewWallet: _isNewWallet } =
+        await this.distributionEngine._resolveWalletWithMeta(rating.domain);
       await this.distributionEngine.privacyLayer.queueTransaction({
-        walletAddress: await this.distributionEngine.getWalletAddressForDomain(rating.domain),
+        walletAddress: _walletAddr,
+        isNewWallet: _isNewWallet,
         domain: rating.domain,
         score: rating.score,
         tokens: standardizedDifferenz,
@@ -333,11 +297,6 @@ class RetroPayoutService {
         }
       });
 
-      console.log('[RetroPayoutService] ✅ Correction transaction queued:', {
-        ratingRef: rating.ratingRef.substring(0, 12) + '...',
-        tokens: standardizedDifferenz.toString(),
-        pairIndex
-      });
     }
 
     return correctionTx;
@@ -368,12 +327,6 @@ class RetroPayoutService {
         'rev_stored_transactions': transactions
       });
 
-      console.log('[RetroPayoutService] Transaction saved:', {
-        ratingRef: transaction.ratingRef.substring(0, 12) + '...',
-        type: transaction.type,
-        tokens: transaction.istTokens
-      });
-
     } catch (error) {
       console.error('[RetroPayoutService] Error saving transaction:', error);
       throw error;
@@ -384,7 +337,6 @@ class RetroPayoutService {
    * Manueller Trigger (für Testing/Debugging)
    */
   async triggerManualCheck() {
-    console.log('[RetroPayoutService] 🔧 Manual check triggered');
     return await this.checkAndCreatePayouts();
   }
 

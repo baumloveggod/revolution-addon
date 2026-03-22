@@ -25,15 +25,6 @@ async function fetchWithVersion(url, options = {}) {
     'X-Client-Type': 'firefox-addon'
   };
 
-  // DEBUG: Log headers being sent
-  if (url.includes('192.168.178.130:4200')) {
-    console.log('[fetchWithVersion] DEBUG: Sending request to messaging-service:', {
-      url,
-      headers,
-      hasVersionHeader: !!headers['X-Client-API-Version']
-    });
-  }
-
   const response = await fetch(url, { ...options, headers });
 
   // Check for version warnings in response

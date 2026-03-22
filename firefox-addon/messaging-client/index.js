@@ -6,7 +6,7 @@
  * import { MessagingClient } from 'messaging-client';
  *
  * const client = new MessagingClient({
- *   serviceUrl: 'http://192.168.178.130:4200',
+ *   serviceUrl: 'https://msg.lenkenhoff.de',
  *   pollInterval: 5000,
  *   authToken: 'your-jwt-token'
  * });

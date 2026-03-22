@@ -194,7 +194,6 @@ function injectWalletDependencies(deps) {
         distributionEngine: deps.distributionEngine || revolution.distributionEngine || null
       };
       revolution.privacyLayer.transactionQueue.setDependencies(depsWithTracker);
-      console.log('[PrivacyLayer] Wallet dependencies injected into existing TransactionQueue');
     }
   }
 }

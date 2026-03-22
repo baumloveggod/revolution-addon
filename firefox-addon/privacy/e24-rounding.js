@@ -21,11 +21,6 @@ class E24Rounding {  // Name bleibt für Backward Compatibility
     this.e24Series = config.e48 || config.e24;
     this.roundingErrors = new Map(); // domain -> accumulated error
 
-    console.log('[E24Rounding] Initialized with series:', {
-      seriesLength: this.e24Series?.length,
-      isE48: this.e24Series?.length === 49,
-      isE24: this.e24Series?.length === 25
-    });
   }
 
   /**

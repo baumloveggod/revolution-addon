@@ -6,8 +6,6 @@
 
 // Wrap in IIFE to avoid global variable conflicts
 (function() {
-  console.log('[MessagingIntegration] Script loading...');
-
   if (typeof window.MessagingIntegration === 'undefined') {
     window.MessagingIntegration = {};
   }
@@ -44,12 +42,10 @@
       // Binary Model: Device can poll as long as it has a messagingAddress (= signingPublicKey)
       // No need to wait for groupKeys - ADDRESS_UPDATE will be received via polling
       if (!client.fingerprint && !client.messagingAddress) {
-        console.log('[MessagingIntegration] ⏸️ Skipping polling - no messaging address yet');
         return;
       }
 
       // Start polling immediately
-      console.log('[MessagingIntegration] 🔄 Starting polling (Binary Model - will receive ADDRESS_UPDATE)');
       client.startPolling();
       return;
     } catch (error) {
@@ -87,7 +83,6 @@
   window.MessagingIntegration.initMessaging = async function(userToken, origin = 'https://api.lenkenhoff.de') {
     // Skip if initialization is in progress - return existing promise instead of busy-wait
     if (isInitializing && initializationPromise) {
-      console.log('[MessagingIntegration] ⏳ Initialization already in progress, waiting for completion...');
       return await initializationPromise;
     }
 
@@ -108,11 +103,6 @@
           const groupIdChanged = oldGroupId && oldGroupId !== groupId;
 
           if (groupIdChanged) {
-            console.log('[MessagingIntegration] 🔄 User switched! Clearing old messaging keys...', {
-              oldGroupId,
-              newGroupId: groupId
-            });
-
             // Clear group keys
             messagingClient.groupKeys = {};
 
@@ -121,8 +111,6 @@
 
             // Stop polling old group
             messagingClient.stopPolling();
-
-            console.log('[MessagingIntegration] ✅ Old messaging keys cleared');
           }
 
           messagingClient.groupId = groupId;
@@ -169,7 +157,6 @@
       });
 
       await messagingClient.initialize();
-      console.log('[MessagingIntegration] ✅ Client initialized with fingerprint:', messagingClient.fingerprint?.substring(0, 16) + '...');
 
       // Set groupId and authToken if we have them
       if (groupId && userToken) {
@@ -273,8 +260,49 @@ function handleMessage(message) {
     case 'device_registration':
       handleDeviceRegistered(message.payload);
       break;
+    case 'feedback':
+      handleFeedbackMessage(message.payload);
+      break;
     default:
-      console.log('[MessagingIntegration] ⚠️ Unknown message type:', message.type);
+      console.warn('[MessagingIntegration] ⚠️ Unknown message type:', message.type);
+  }
+}
+
+/**
+ * Handle feedback message from website.
+ *
+ * The MessagingClient already E2E-decrypts the message before calling onMessage,
+ * so message.payload here is the plain feedback object — no additional decryption needed.
+ *
+ * Expected payload shape (matches what the website sends via /vault/feedback → DeviceMessage):
+ *   { rating_ref, feedback_type, domain, submitted_at }
+ */
+async function handleFeedbackMessage(payload) {
+  try {
+    // Parse payload if it arrived as a JSON string
+    let feedbackData = payload;
+    if (typeof payload === 'string') {
+      try { feedbackData = JSON.parse(payload); } catch (_) { feedbackData = payload; }
+    }
+
+    if (!feedbackData || !feedbackData.rating_ref || !feedbackData.feedback_type) {
+      console.error('[MessagingIntegration] ❌ Invalid feedback payload:', feedbackData);
+      return;
+    }
+
+    // Process via FeedbackManager
+    if (typeof window.FeedbackManager === 'function') {
+      const manager = new window.FeedbackManager();
+      await manager.processFeedback(feedbackData);
+    } else {
+      console.warn('[MessagingIntegration] ⚠️ FeedbackManager not loaded, storing for later');
+      const stored = await browser.storage.local.get('pending_feedback');
+      const pending = stored.pending_feedback || [];
+      pending.push(feedbackData);
+      await browser.storage.local.set({ pending_feedback: pending });
+    }
+  } catch (error) {
+    console.error('[MessagingIntegration] ❌ Failed to handle feedback message:', error.message);
   }
 }
 
@@ -283,8 +311,6 @@ function handleMessage(message) {
  * Receives CL wallet and confirms device can start polling
  */
 function handleDeviceRegistered(payload) {
-  console.log('[MessagingIntegration] 📨 Device registration confirmation received');
-
   try {
     const { walletAddress, wallet_key, groupKeys, deviceId, userId } = payload;
 
@@ -293,18 +319,10 @@ function handleDeviceRegistered(payload) {
       return;
     }
 
-    console.log('[MessagingIntegration] ✅ CL Wallet received:', {
-      address: walletAddress,
-      hasPrivateKey: !!wallet_key,
-      groupKeyCount: groupKeys?.length || 0,
-      deviceId: deviceId?.substring(0, 16) + '...'
-    });
-
     // Ensure wallet address has CL:: prefix
     let normalizedWalletAddress = walletAddress;
     if (!normalizedWalletAddress.startsWith('CL::')) {
       normalizedWalletAddress = 'CL::' + normalizedWalletAddress;
-      console.log('[MessagingIntegration] Added CL:: prefix to wallet address');
     }
 
     // Store CL wallet in browser.storage.local
@@ -314,17 +332,12 @@ function handleDeviceRegistered(payload) {
         privateKey: wallet_key,
         receivedAt: Date.now()
       }
-    }).then(() => {
-      console.log('[MessagingIntegration] ✅ CL Wallet stored successfully');
-      showNotification('Device Registered', 'Your device can now execute transactions!');
     }).catch(error => {
       console.error('[MessagingIntegration] ❌ Failed to store wallet:', error);
     });
 
     // Update group keys if provided
     if (groupKeys && groupKeys.length > 0 && messagingClient) {
-      console.log('[MessagingIntegration] 🔑 Updating group keys...');
-
       const groupKeyMap = {};
       groupKeys.forEach(key => {
         groupKeyMap[key.fingerprint] = {
@@ -334,7 +347,6 @@ function handleDeviceRegistered(payload) {
       });
 
       messagingClient.groupKeys = groupKeyMap;
-      console.log('[MessagingIntegration] ✅ Group keys updated:', Object.keys(groupKeyMap).length);
     }
 
     // Store message log
@@ -359,12 +371,6 @@ function handleRatingMessage(payload) {
  */
 function handleRatingFullMessage(payload) {
   storeMessageLog('rating_full', payload);
-  console.log('[MessagingIntegration] RATING_FULL received:', {
-    ratingRef: payload.ratingRef,
-    hasSeedCLtoSH: !!payload.seedCLtoSH,
-    hasSeedSHtoDS: !!payload.seedSHtoDS,
-    transactionPairCount: payload.transactionPairs?.length || 0
-  });
   // TODO: Store in local database for analytics
   // TODO: Send to website backend for matching
 }
@@ -376,13 +382,6 @@ function handleRatingFullMessage(payload) {
  */
 async function handleRatingSummaryMessage(payload) {
   storeMessageLog('rating_summary', payload);
-
-  console.log('[MessagingIntegration] RATING_SUMMARY received:', {
-    ratingRef: payload.ratingRef,
-    hasSeedCLtoSH: !!payload.seedCLtoSH,
-    transactionCount: payload.transactionIndices?.length || 0,
-    timestamp: payload.timestamp
-  });
 
   try {
     // Validiere Payload
@@ -429,12 +428,6 @@ async function handleRatingSummaryMessage(payload) {
     // Speichere in browser.storage für späteren Zugriff
     await storeRatingSummaryNotification(notification);
 
-    console.log('[MessagingIntegration] ✅ RATING_SUMMARY processed:', {
-      ratingRef: payload.ratingRef,
-      fingerprintsGenerated: fingerprints.length,
-      canQueryLedger: true
-    });
-
     // TODO: Display in UI (other device made a payment)
     // TODO: Optional: Query Central Ledger für Status der Fingerprints
 
@@ -462,11 +455,6 @@ async function storeRatingSummaryNotification(notification) {
       rev_rating_summaries: trimmedSummaries
     });
 
-    console.log('[MessagingIntegration] Notification stored:', {
-      ratingRef: notification.ratingRef,
-      totalStored: trimmedSummaries.length
-    });
-
   } catch (error) {
     console.error('[MessagingIntegration] ❌ Failed to store notification:', error);
   }
@@ -483,11 +471,6 @@ async function storeRatingSummaryNotification(notification) {
  */
 async function handleAddressUpdate(payload) {
   try {
-    console.log('[MessagingIntegration] 📨 ADDRESS_UPDATE received');
-    console.log('[MessagingIntegration] DEBUG: payload keys:', Object.keys(payload));
-    console.log('[MessagingIntegration] DEBUG: has cl_wallet_address:', !!payload.cl_wallet_address);
-    console.log('[MessagingIntegration] DEBUG: has cl_wallet_key:', !!payload.cl_wallet_key);
-
     // Verify signature from website (website.messaging_address = signingPublicKey)
     const { signature, cl_wallet_key, ...data } = payload;
 
@@ -534,17 +517,9 @@ async function handleAddressUpdate(payload) {
 
     // Decrypt CL wallet private key if present
     let clWalletPrivateKey = null;
-    console.log('[MessagingIntegration] DEBUG: Checking CL wallet key conditions:', {
-      has_cl_wallet_key: !!cl_wallet_key,
-      has_ciphertext: cl_wallet_key?.ciphertext,
-      has_nonce: cl_wallet_key?.nonce,
-      has_messagingClient: !!messagingClient
-    });
 
     if (cl_wallet_key && cl_wallet_key.ciphertext && cl_wallet_key.nonce && messagingClient) {
       try {
-        console.log('[MessagingIntegration] 🔐 Decrypting CL wallet private key...');
-
         // Get our encryption private key
         const myEncryptionPrivateKey = messagingClient.keyPair.privateKey;
         const websiteEncryptionPublicKey = data.website.encryption_key;
@@ -566,7 +541,6 @@ async function handleAddressUpdate(payload) {
         );
 
         clWalletPrivateKey = new TextDecoder().decode(decryptedBytes);
-        console.log('[MessagingIntegration] ✅ CL wallet private key decrypted');
       } catch (decryptError) {
         console.error('[MessagingIntegration] ❌ Failed to decrypt CL wallet key:', decryptError.message);
       }
@@ -588,12 +562,6 @@ async function handleAddressUpdate(payload) {
     };
 
     // Store CL wallet if decrypted
-    console.log('[MessagingIntegration] DEBUG: Checking CL wallet storage conditions:', {
-      has_clWalletPrivateKey: !!clWalletPrivateKey,
-      has_cl_wallet_address: !!data.cl_wallet_address,
-      cl_wallet_address_value: data.cl_wallet_address
-    });
-
     if (clWalletPrivateKey && data.cl_wallet_address) {
       // Ensure wallet address has CL:: prefix
       let normalizedWalletAddress = data.cl_wallet_address;
@@ -607,10 +575,7 @@ async function handleAddressUpdate(payload) {
         source: 'address_update'
       };
 
-      console.log('[MessagingIntegration] 💾 CL Wallet stored from ADDRESS_UPDATE:', {
-        address: normalizedWalletAddress,
-        hasPrivateKey: true
-      });
+      console.log('[MessagingIntegration] 💾 CL Wallet stored from ADDRESS_UPDATE');
     } else {
       console.warn('[MessagingIntegration] ⚠️ CL Wallet NOT stored - missing private key or address');
     }
@@ -618,21 +583,10 @@ async function handleAddressUpdate(payload) {
     // Save to browser storage
     await browser.storage.local.set(storageData);
 
-    console.log('[MessagingIntegration] ✅ ADDRESS_UPDATE stored locally:', {
-      websiteAddress: data.website.messaging_address.substring(0, 16) + '...',
-      deviceCount: (data.devices || []).length,
-      ratingSum: data.rating_sum,
-      hasCLWallet: !!clWalletPrivateKey
-    });
-
     // Trigger wallet init if CL wallet was received
     if (clWalletPrivateKey) {
       // ALWAYS try to init/reload wallet when we receive an ADDRESS_UPDATE with wallet data
       // This ensures WalletManager is aware of the new wallet even if already initialized
-      console.log('[MessagingIntegration] 🔄 Triggering wallet initialization/reload via retryWalletInitIfNeeded...', {
-        _walletInitialized: window._walletInitialized
-      });
-
       if (typeof window.retryWalletInitIfNeeded === 'function') {
         try {
           // If wallet is already initialized, we need to force a reload
@@ -640,15 +594,12 @@ async function handleAddressUpdate(payload) {
           const wasInitialized = window._walletInitialized;
 
           if (wasInitialized) {
-            console.log('[MessagingIntegration] ⚠️ Wallet already initialized - forcing reload to pick up new CL wallet');
             window._walletInitialized = false;
             window._walletInitFailed = false;
             window._walletInitError = null;
           }
 
           await window.retryWalletInitIfNeeded();
-
-          console.log('[MessagingIntegration] ✅ Wallet initialization/reload completed');
         } catch (error) {
           console.error('[MessagingIntegration] ❌ Failed to init wallets:', error);
         }
@@ -667,16 +618,7 @@ async function handleAddressUpdate(payload) {
       myMessagingAddress = stored.rev_messaging_address || null;
     }
 
-    console.log('[MessagingIntegration] 🔍 Checking device linking conditions:', {
-      hasCLWalletAddress: !!data.cl_wallet_address,
-      hasMessagingClient: !!messagingClient,
-      hasMessagingAddress: !!myMessagingAddress,
-      messagingAddress: myMessagingAddress?.substring(0, 20) + '...'
-    });
-
     if (data.cl_wallet_address && myMessagingAddress) {
-      console.log('[MessagingIntegration] 🔗 Setting deviceStatus to linked (ADDRESS_UPDATE flow)');
-
       // Find our own device in the devices list
       const myDevice = (data.devices || []).find(d => d.messaging_address === myMessagingAddress);
 
@@ -716,10 +658,6 @@ async function handleAddressUpdate(payload) {
       // Persist state using background.js persistState function
       if (typeof window.persistState === 'function') {
         await window.persistState(updatedState);
-        console.log('[MessagingIntegration] ✅ Device status set to linked:', {
-          walletAddress: data.cl_wallet_address.substring(0, 20) + '...',
-          messagingAddress: myMessagingAddress?.substring(0, 20) + '...'
-        });
       } else {
         console.warn('[MessagingIntegration] ⚠️ persistState function not available');
       }
@@ -728,8 +666,6 @@ async function handleAddressUpdate(payload) {
     // Show notification
     const hasWallet = clWalletPrivateKey ? ' (inkl. Wallet-Daten)' : '';
     showNotification('🔑 Adressbuch aktualisiert', `${(data.devices || []).length} Geräte empfangen${hasWallet}`);
-
-    console.log('[MessagingIntegration] ✅ ADDRESS_UPDATE processed successfully');
 
   } catch (error) {
     console.error('[MessagingIntegration] ❌ Failed to handle ADDRESS_UPDATE:', error.message, error.stack);
@@ -877,8 +813,6 @@ window.MessagingIntegration.getMessagingInfo = function() {
  * Clear all messaging data (called on logout)
  */
 window.MessagingIntegration.clearAllData = async function() {
-  console.log('[MessagingIntegration] 🗑️  Clearing all messaging data...');
-
   try {
     // Stop polling first
     if (messagingClient) {
@@ -898,7 +832,6 @@ window.MessagingIntegration.clearAllData = async function() {
     isInitialized = false;
     messagingClient = null;
 
-    console.log('[MessagingIntegration] ✅ All messaging data cleared');
   } catch (error) {
     console.error('[MessagingIntegration] ❌ Failed to clear messaging data:', error);
     throw error;
@@ -912,5 +845,4 @@ window.MessagingIntegration.clearAllData = async function() {
     return isInitialized && messagingClient !== null;
   };
 
-  console.log('[MessagingIntegration] Script loaded');
 })();

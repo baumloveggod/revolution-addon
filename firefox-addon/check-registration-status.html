@@ -158,7 +158,7 @@
         const groupId = `group-user-${tokenPayload.userId}`;
 
         // Fetch group keys from server
-        const response = await fetch(`http://localhost:4200/keys?groupId=${groupId}`, {
+        const response = await fetch(`https://msg.lenkenhoff.de/keys?groupId=${groupId}`, {
           headers: {
             'Authorization': `Bearer ${token}`
           }

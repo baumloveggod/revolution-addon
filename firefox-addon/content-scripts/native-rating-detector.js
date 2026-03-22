@@ -100,7 +100,6 @@ class NativeRatingDetector {
       this.initialize();
     }
 
-    console.log('[Revolution] Native rating detector initialized for', this.domain);
   }
 
   getDomain() {
@@ -131,8 +130,6 @@ class NativeRatingDetector {
   }
 
   setupDetection() {
-    console.log('[Revolution] Setting up native rating detection for', this.domain);
-
     // Setup based on pattern type
     switch (this.pattern.type) {
       case 'like-dislike':
@@ -329,7 +326,6 @@ class NativeRatingDetector {
   setRating(rating) {
     if (rating !== this.rating) {
       this.rating = rating;
-      console.log('[Revolution] Native rating detected:', rating);
 
       // Notify background script
       try {
@@ -385,4 +381,3 @@ if (typeof window !== 'undefined') {
   window.nativeRatingDetector = nativeRatingDetector;
 }
 
-console.log('[Revolution] Native rating detector script loaded');

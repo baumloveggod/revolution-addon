@@ -1,5 +1,4 @@
 // Tracking-Modul wird automatisch durch manifest.json geladen
-console.log('[background.js] 🔥 FILE LOADING - Version 0.1.5');
 
 const STORAGE_KEY = 'rev_connector_state';
 const SITE_ORIGINS = ['https://api.lenkenhoff.de'];
@@ -108,7 +107,6 @@ async function initializeWalletDependencies() {
   }
 
   if (!window._walletManager) {
-    console.log('[initWallets] Initializing WalletManager globally...');
     window._walletManager = new WalletManager({
       clApiUrl:     'https://ledger.lenkenhoff.de',
       clReadApiUrl: 'https://read.lenkenhoff.de',
@@ -118,7 +116,6 @@ async function initializeWalletDependencies() {
   }
 
   if (!window._anonClient) {
-    console.log('[initWallets] Initializing AnonTransactionClient globally...');
     window._anonClient = new AnonTransactionClient({
       anonApiUrl:   'https://ledger.lenkenhoff.de/anon',
       clApiUrl:     'https://ledger.lenkenhoff.de',
@@ -128,7 +125,6 @@ async function initializeWalletDependencies() {
     });
   }
 
-  console.log('[initWallets] ✅ Wallet dependencies ready');
   return true;
 }
 
@@ -154,8 +150,6 @@ let retroPayoutService = null;
 
 // Initialize addon on load
 (async function initAddon() {
-  console.log('[background.js] Initializing addon...');
-
   // Initialize wallet dependencies IMMEDIATELY
   const walletsReady = await initializeWalletDependencies();
   if (!walletsReady) {
@@ -165,7 +159,6 @@ let retroPayoutService = null;
   // Process pending queue if device linked
   const state = await loadState();
   if (state?.device && state.deviceStatus === 'linked' && walletsReady) {
-    console.log('[background.js] Device linked - processing pending queue');
     setTimeout(() => {
       if (window.transactionQueue) {
         window.transactionQueue.processPendingQueue();
@@ -194,7 +187,6 @@ let retroPayoutService = null;
         return;
       }
 
-      console.log('[background.js] 🚀 Starting RetroPayoutService...');
       retroPayoutService = new RetroPayoutService(
         window.revolution.distributionEngine,
         window.revolution.distributionEngine.translationFactorTracker,
@@ -202,7 +194,6 @@ let retroPayoutService = null;
       );
 
       retroPayoutService.start();
-      console.log('[background.js] ✅ RetroPayoutService started successfully');
 
     } catch (error) {
       console.error('[background.js] ❌ Failed to start RetroPayoutService:', error);
@@ -420,7 +411,6 @@ async function claimInvite(origin, inviteToken, userToken) {
     timestamp: Date.now()
   };
 
-  console.log('[claimInvite] 📝 Sending registration request to website via postMessage');
   if (typeof window.LogClient !== 'undefined') {
     window.LogClient.sendLog('browser-addon', 'registration_request_sent', 'Device registration request sent to website', {
       messagingAddress: messagingKeys.messaging_address.substring(0, 20) + '...'
@@ -443,10 +433,7 @@ async function claimInvite(origin, inviteToken, userToken) {
   const tabId = websiteTab.id;
   const tabUrl = websiteTab.url;
 
-  console.log('[claimInvite] Found website tab:', tabId, 'URL:', tabUrl);
-
   // Check if website registration handler is ready
-  console.log('[claimInvite] 🔍 Checking if website registration handler is ready...');
   let handlerReady = false;
   const maxReadyAttempts = 10; // Try for up to 10 seconds
 
@@ -457,11 +444,9 @@ async function claimInvite(origin, inviteToken, userToken) {
       });
 
       if (readyCheck && readyCheck.ready) {
-        console.log('[claimInvite] ✅ Website registration handler is ready');
         handlerReady = true;
         break;
       } else {
-        console.log(`[claimInvite] ⏳ Handler not ready yet, waiting... (attempt ${attempt + 1}/${maxReadyAttempts})`);
         await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
       }
     } catch (err) {
@@ -477,15 +462,12 @@ async function claimInvite(origin, inviteToken, userToken) {
   // Send to content script, which will forward to website via postMessage
   try {
     await browser.tabs.sendMessage(tabId, registrationRequest);
-    console.log('[claimInvite] ✅ Message sent to content script');
   } catch (err) {
     console.error('[claimInvite] ❌ Failed to send to content script:', err.message);
     throw new Error('Cannot communicate with website tab - please reload the page and try again');
   }
 
   // Wait for response from website
-  console.log('[claimInvite] ⏳ Waiting for website to process registration...');
-
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       browser.runtime.onMessage.removeListener(responseHandler);
@@ -501,17 +483,6 @@ async function claimInvite(origin, inviteToken, userToken) {
         browser.runtime.onMessage.removeListener(responseHandler);
 
         if (message.status === 'success') {
-          console.log('[claimInvite] ✅ Device registered successfully by website');
-
-          // IMPORTANT: CL wallet private key will be received via ADDRESS_UPDATE (not here!)
-          // Registration response only includes wallet ADDRESS (not private key)
-          if (message.data && message.data.wallet_address) {
-            console.log('[claimInvite] 📍 CL Wallet address received:', message.data.wallet_address);
-            console.log('[claimInvite] ⏳ Waiting for ADDRESS_UPDATE to receive private key...');
-          } else {
-            console.warn('[claimInvite] ⚠️ No wallet address in registration response');
-          }
-
           if (typeof window.LogClient !== 'undefined') {
             window.LogClient.sendLog('browser-addon', 'registration_success', 'Device registered successfully by website', {
               messagingAddress: messagingKeys.messaging_address,
@@ -545,25 +516,19 @@ async function createClientContext(state) {
   const origin = state.origin || pickKnownOrigin();
 
   try {
-    console.log('[DEBUG] 🔗 createClientContext: Starting...');
-
     if (typeof window.LogClient !== 'undefined') {
       window.LogClient.sendLog('browser-addon', 'client_linking_start', 'Starting client linking process', {
         userId: state.profile?.userId
       }, 'info');
     }
 
-    console.log('[DEBUG] 🔗 Calling createInvite...');
     const invite = await createInvite(origin, state.userToken, state.profile);
-    console.log('[DEBUG] 🔗 createInvite completed:', { hasInvite: !!invite, hasToken: !!invite?.invite_token });
 
     if (!invite || !invite.invite_token) {
       throw new Error('invite_failed');
     }
 
-    console.log('[DEBUG] 🔗 Calling claimInvite...');
     const claim = await claimInvite(origin, invite.invite_token, state.userToken);
-    console.log('[DEBUG] 🔗 claimInvite completed:', { hasClaim: !!claim, hasClientToken: !!claim?.client_token });
 
     if (!claim || !claim.client_token) {
       throw new Error('claim_failed');
@@ -572,20 +537,10 @@ async function createClientContext(state) {
     // Load bootstrap keys into messaging client if provided
     if (claim.groupKeys && Array.isArray(claim.groupKeys)) {
       try {
-        console.log('[revolution-addon] 📦 Bootstrap keys received from server', {
-          keyCount: claim.groupKeys.length,
-          sampleKeys: claim.groupKeys.slice(0, 2).map(k => ({
-            fingerprint: k.fingerprint?.substring(0, 16) + '...',
-            hasPublicKey: !!k.publicKey,
-            hasSigningKey: !!k.signingPublicKey
-          }))
-        });
-
         const messagingClient = window.MessagingIntegration.getClient();
 
         if (!messagingClient) {
-          console.error('[revolution-addon] ❌ MessagingClient not available!');
-          console.error('[revolution-addon] ⚠️ Messaging was not initialized before claim');
+          console.error('[revolution-addon] ❌ MessagingClient not available for bootstrap keys!');
 
           if (typeof window.LogClient !== 'undefined') {
             window.LogClient.sendLog('browser-addon', 'bootstrap_keys_no_client',
@@ -595,8 +550,6 @@ async function createClientContext(state) {
           }
           throw new Error('MessagingClient not initialized');
         }
-
-        console.log('[revolution-addon] 📦 Loading bootstrap keys into groupKeys...');
 
         // Clear existing keys (defensive)
         messagingClient.groupKeys = {};
@@ -620,12 +573,6 @@ async function createClientContext(state) {
           loadedCount++;
         }
 
-        console.log('[revolution-addon] ✅ Bootstrap keys loaded', {
-          receivedKeys: claim.groupKeys.length,
-          loadedKeys: loadedCount,
-          fingerprints: Object.keys(messagingClient.groupKeys).map(fp => fp.substring(0, 16) + '...')
-        });
-
         // Verify keys actually loaded
         if (loadedCount === 0) {
           console.error('[revolution-addon] ❌ No valid keys loaded from bootstrap!');
@@ -633,17 +580,13 @@ async function createClientContext(state) {
         }
 
         // Start polling
-        console.log('[revolution-addon] 🔄 Starting message polling...');
         messagingClient.startPolling();
-        console.log('[revolution-addon] ✅ Polling started with', loadedCount, 'group keys');
 
         // CRITICAL: Poll immediately to receive ADDRESS_UPDATE sent by website during registration
         // Without this, the addon would wait up to 30 seconds for the first poll
-        console.log('[revolution-addon] 📥 Polling immediately to receive ADDRESS_UPDATE from registration...');
         setTimeout(async () => {
           try {
             await messagingClient.poll();
-            console.log('[revolution-addon] ✅ Initial poll completed - ADDRESS_UPDATE should now be received');
           } catch (error) {
             console.error('[revolution-addon] ⚠️ Initial poll failed:', error.message);
           }
@@ -657,7 +600,6 @@ async function createClientContext(state) {
         }
       } catch (error) {
         console.error('[revolution-addon] ❌ Failed to load bootstrap keys:', error.message);
-        console.error('[revolution-addon] ⚠️ Messaging may not work until ADDRESS_UPDATE received');
 
         if (typeof window.LogClient !== 'undefined') {
           window.LogClient.sendLog('browser-addon', 'bootstrap_keys_failed',
@@ -680,11 +622,6 @@ async function createClientContext(state) {
           'No bootstrap keys in claim response', {}, 'warning');
       }
     }
-
-    // ZERO-KNOWLEDGE: No need for /auth/device-session anymore
-    // Website has already signed the registration response with wallet address
-    // Addon uses User-Token directly for API calls
-    console.log('[revolution-addon] ✅ Using Zero-Knowledge architecture - no device-session needed');
 
     // Server now returns only snake_case
     const clientId = claim.client_id;
@@ -744,20 +681,7 @@ async function refreshClientSession(origin, clientContext) {
 }
 
 async function ensureClientContext(state, persistFn = async () => {}) {
-  console.log('[DEBUG] 🔗 ensureClientContext START:', {
-    hasState: !!state,
-    hasUserToken: !!(state && state.userToken),
-    hasPendingSwitch: !!(state && state.pendingSwitch),
-    hasDevice: !!(state && state.device),
-    deviceStatus: state && state.deviceStatus,
-    userId: state && state.profile && state.profile.userId,
-    linkingStartTime: state && state.clientLinkingStartTime
-  });
-
   if (!state || !state.userToken || state.pendingSwitch) {
-    console.log('[DEBUG] 🔗 ensureClientContext EARLY RETURN (line 500):', {
-      reason: !state ? 'no_state' : !state.userToken ? 'no_token' : 'pending_switch'
-    });
     return state;
   }
 
@@ -765,7 +689,7 @@ async function ensureClientContext(state, persistFn = async () => {}) {
   if (state.deviceStatus === 'linking' && state.clientLinkingStartTime) {
     const linkingDuration = Date.now() - state.clientLinkingStartTime;
     if (linkingDuration > 30000) {
-      console.warn('[DEBUG] 🔗 Linking stuck for', linkingDuration, 'ms - resetting to idle and retrying');
+      console.warn('[ensureClientContext] Linking stuck for', linkingDuration, 'ms - resetting to idle and retrying');
       // Reset stuck linking state
       const resetState = {
         ...state,
@@ -787,16 +711,13 @@ async function ensureClientContext(state, persistFn = async () => {}) {
   const existingClient = state.device;
 
   if (existingClient && existingClient.userId === userId) {
-    console.log('[DEBUG] 🔗 existingClient found for same user, checking session validity');
     if (isClientSessionValid(existingClient)) {
-      console.log('[DEBUG] 🔗 ensureClientContext EARLY RETURN (line 519): session still valid');
       return {
         ...state,
         deviceStatus: 'linked',
         deviceError: null
       };
     }
-    console.log('[DEBUG] 🔗 Session expired, attempting refresh...');
     try {
       const refreshed = await refreshClientSession(origin, existingClient);
       return {
@@ -827,23 +748,18 @@ async function ensureClientContext(state, persistFn = async () => {}) {
 
   if (linkingPromise && linkingUserId === userId) {
     // Only wait for linkingPromise if it's for the SAME user
-    console.log('[DEBUG] 🔗 linkingPromise exists for same user, waiting for it...');
     try {
       const resultState = await linkingPromise;
       if (resultState && resultState.profile && resultState.profile.userId === userId) {
-        console.log('[DEBUG] 🔗 ensureClientContext EARLY RETURN (line 560): linkingPromise resolved');
         return resultState;
       }
-      console.log('[DEBUG] 🔗 linkingPromise resolved but userId mismatch, continuing...');
     } catch (errorState) {
-      console.log('[DEBUG] 🔗 linkingPromise rejected:', errorState);
       if (errorState && errorState.clientStatus === 'error') {
         return errorState;
       }
     }
   } else if (linkingPromise && linkingUserId !== userId) {
     // Different user - cancel old linkingPromise and start fresh
-    console.log('[DEBUG] 🔗 linkingPromise exists but for DIFFERENT user (old:', linkingUserId, 'new:', userId, ') - canceling old promise');
     linkingPromise = null;
     linkingUserId = null;
     linkingInProgress = false;
@@ -862,16 +778,7 @@ async function ensureClientContext(state, persistFn = async () => {}) {
                        !isRateLimitError &&
                        timeSinceError > 10000; // Wait at least 10 seconds
 
-    console.log('[DEBUG] 🔗 deviceStatus is error:', {
-      timeSinceError,
-      retryable: state.deviceErrorDetails.retryable,
-      isRateLimitError,
-      shouldRetry,
-      httpStatus: state.deviceErrorDetails.httpStatus
-    });
-
     if (shouldRetry) {
-      console.log('[ensureClientContext] Auto-retrying after error cooldown');
       // Clear error and try again
       const clearedState = {
         ...state,
@@ -883,19 +790,11 @@ async function ensureClientContext(state, persistFn = async () => {}) {
       return ensureClientContext(clearedState, persistFn);
     }
 
-    // Otherwise show error (waiting for cooldown or rate limit)
-    if (isRateLimitError) {
-      console.log('[DEBUG] 🔗 ensureClientContext EARLY RETURN: Rate limit error - NO auto-retry');
-    } else {
-      const waitTime = Math.ceil((10000 - timeSinceError) / 1000);
-      console.log(`[DEBUG] 🔗 ensureClientContext EARLY RETURN: error state waiting for retry (${waitTime}s remaining)`);
-    }
     return state;
   }
 
   // CRITICAL: Check synchronous flag to prevent race conditions
   if (linkingInProgress) {
-    console.log('[DEBUG] 🔗 ensureClientContext EARLY RETURN: Linking already in progress (race condition prevented)');
     // Return state with 'linking' status so TransactionQueue knows to wait
     const linkingStateForWait = {
       ...state,
@@ -909,7 +808,6 @@ async function ensureClientContext(state, persistFn = async () => {}) {
 
   // Set synchronous flag IMMEDIATELY to prevent concurrent linking attempts
   linkingInProgress = true;
-  console.log('[DEBUG] 🔗 Starting linking process... (linkingInProgress flag set)');
 
   const linkingState = {
     ...state,
@@ -918,13 +816,10 @@ async function ensureClientContext(state, persistFn = async () => {}) {
     clientLinkingStartTime: Date.now()
   };
   await persistFn(linkingState);
-  console.log('[DEBUG] 🔗 linkingState persisted, creating linkingPromise...');
   linkingUserId = userId;  // Track which user we're linking for
   linkingPromise = (async () => {
-    console.log('[DEBUG] 🔗 linkingPromise async function started, calling createClientContext...');
     try {
       const context = await createClientContext(linkingState);
-      console.log('[DEBUG] 🔗 createClientContext returned successfully');
       const finalState = {
         ...linkingState,
         device: context,
@@ -942,7 +837,7 @@ async function ensureClientContext(state, persistFn = async () => {}) {
 
       return finalState;
     } catch (error) {
-      console.error('[revolution-addon] Linking failed:', error.message);
+      console.error('[revolution-addon] ❌ Linking failed:', error.message);
 
       // Structure error details
       const errorDetails = {
@@ -974,16 +869,12 @@ async function ensureClientContext(state, persistFn = async () => {}) {
       throw failedState;
     }
   })();
-  console.log('[DEBUG] 🔗 linkingPromise created, now awaiting it...');
   try {
     const resolvedState = await linkingPromise;
-    console.log('[DEBUG] 🔗 linkingPromise resolved successfully');
     return resolvedState;
   } catch (stateAfterError) {
-    console.error('[DEBUG] 🔗 linkingPromise rejected with error:', stateAfterError);
     return stateAfterError;
   } finally {
-    console.log('[DEBUG] 🔗 linkingPromise cleanup (setting to null and clearing flag)');
     linkingPromise = null;
     linkingUserId = null;
     linkingInProgress = false;  // Clear synchronous flag
@@ -991,31 +882,19 @@ async function ensureClientContext(state, persistFn = async () => {}) {
 }
 
 async function handlePageTokenMessage(message, sender) {
-  console.log('[DEBUG] 🎫 handlePageTokenMessage called', {
-    hasMessage: !!message,
-    hasToken: !!(message && message.token),
-    hasSender: !!sender,
-    senderUrl: sender?.url
-  });
-
   const senderUrl = sender && sender.url;
   const senderTabUrl = sender && sender.tab ? sender.tab.url : null;
   const sourceUrl = (message && message.url) || senderUrl || senderTabUrl;
   const origin = resolveOrigin(sourceUrl);
 
-  console.log('[DEBUG] 🎫 Origin resolved:', { sourceUrl, origin });
-
   if (!origin) {
-    console.log('[DEBUG] ⚠️ Origin not allowed, returning early');
     return { ok: false, reason: 'origin_not_allowed' };
   }
   const token = message && message.token;
   if (!token) {
-    console.log('[DEBUG] ⚠️ No token in message - website logged out, clearing addon state');
     // Clear state when website logs out
     const existingState = await loadState();
     if (existingState && existingState.userToken) {
-      console.log('[DEBUG] 🧹 Clearing addon state because website logged out');
       const clearedState = createState({
         origin: existingState.origin
       });
@@ -1025,11 +904,8 @@ async function handlePageTokenMessage(message, sender) {
     return { ok: true, status: 'no_token_no_state' };
   }
 
-  console.log('[DEBUG] 🎫 Token received:', token.substring(0, 50) + '...');
-
   // CRITICAL: Prevent concurrent linking attempts
   if (linkingPromise) {
-    console.log('[DEBUG] ⏭️ Linking already in progress, skipping to avoid duplicates');
     return { ok: true, status: 'linking_in_progress_skipped' };
   }
 
@@ -1042,7 +918,6 @@ async function handlePageTokenMessage(message, sender) {
   if ((token === lastProcessedToken && !needsLinking) ||
       (existingState && existingState.userToken === token && existingState.device &&
        existingState.deviceStatus === 'linked' && isClientSessionValid(existingState.device))) {
-    console.log('[DEBUG] ⏭️ Token unchanged and client linked with valid session, skipping processing to avoid duplicates');
     return { ok: true, status: 'token_unchanged_skipped' };
   }
 
@@ -1050,11 +925,10 @@ async function handlePageTokenMessage(message, sender) {
   lastProcessedToken = token;
 
   // VALIDATE TOKEN BY DECODING IT
-  console.log('[DEBUG] 🎫 Validating token from website...');
   const payload = decodeJwtPayload(token);
 
   if (!payload || !payload.userId) {
-    console.warn('[DEBUG] ❌ Token validation failed: Invalid payload');
+    console.warn('[handlePageTokenMessage] Token validation failed: Invalid payload');
     notifyUser(
       '⚠️ Invalid Token',
       'The token from the website is invalid. Please try logging in again.'
@@ -1062,49 +936,26 @@ async function handlePageTokenMessage(message, sender) {
     return { ok: false, status: 'token_validation_failed', reason: 'invalid_payload' };
   }
 
-  console.log('[DEBUG] ✅ Token validation successful');
-
   const profile = buildProfileFromPayload(payload);
 
-  console.log('[DEBUG] 🎫 Profile built:', {
-    hasPayload: !!payload,
-    hasProfile: !!profile,
-    userId: profile?.userId,
-    username: profile?.username,
-    clientWallet: profile?.clientWallet ? profile.clientWallet.substring(0, 20) + '...' : 'none'
-  });
-
   const nowIso = new Date().toISOString();
-
-  console.log('[DEBUG] 🎫 State already loaded (reusing from debouncing check):', {
-    hasExistingState: !!existingState,
-    hasUserToken: !!existingState?.userToken,
-    existingUserId: existingState?.profile?.userId,
-    needsLinking
-  });
 
   const persistIntermediate = async (state) => persistState(state);
 
   if (!existingState || !existingState.userToken) {
-    console.log('[DEBUG] 🎫 NEW USER - Creating fresh state and linking client');
     let newState = createState({
       userToken: token,
       profile,
       origin,
       syncedAt: nowIso
     });
-    console.log('[DEBUG] 🎫 Calling ensureClientContext...');
     newState = await ensureClientContext(newState, persistIntermediate);
-    console.log('[DEBUG] 🎫 ensureClientContext completed, persisting state...');
     await persistState(newState);
-    console.log('[DEBUG] 🎫 Calling retryWalletInitIfNeeded...');
     await retryWalletInitIfNeeded();
-    console.log('[DEBUG] ✅ State persisted, returning success');
     return { ok: true, status: 'linked', profile: newState.profile };
   }
 
   if (existingState.userToken === token) {
-    console.log('[DEBUG] 🎫 SAME TOKEN - Updating existing state');
     let updated = {
       ...existingState,
       profile: profile || existingState.profile,
@@ -1114,9 +965,7 @@ async function handlePageTokenMessage(message, sender) {
     };
     updated = await ensureClientContext(updated, persistIntermediate);
     await persistState(updated);
-    console.log('[DEBUG] 🎫 Calling retryWalletInitIfNeeded...');
     await retryWalletInitIfNeeded();
-    console.log('[DEBUG] ✅ State updated, returning success');
     return { ok: true, status: 'unchanged', profile: updated.profile };
   }
 
@@ -1147,16 +996,13 @@ async function handlePageTokenMessage(message, sender) {
 
   if (!hasValidClient) {
     // Alter Client ist ungültig/nicht vorhanden → direkt einloggen mit neuem User
-    console.log('[revolution-addon] Alter Client ungültig, direkt einloggen mit neuem User');
     let newState = createState({
       userToken: token,
       profile,
       origin,
       syncedAt: nowIso
     });
-    console.log('[revolution-addon] 🔗 Calling ensureClientContext for new user...');
     newState = await ensureClientContext(newState, persistIntermediate);
-    console.log('[revolution-addon] ✅ ensureClientContext completed');
     await persistState(newState);
     await retryWalletInitIfNeeded();
     return { ok: true, status: 'switched_to_new_user', profile: newState.profile };
@@ -1236,19 +1082,11 @@ async function applyPendingProfile() {
   // Send disconnect message for old profile before switching
   if (state.device) {
     try {
-      console.log('[revolution-addon] 📤 Sending client_disconnected message before profile switch...');
-
       const messagingClient = window.MessagingIntegration?.getClient();
       if (messagingClient && typeof window.MessagingIntegration?.sendMessage === 'function') {
         // IMPORTANT: Capture old groupId BEFORE any state changes
         const oldGroupId = messagingClient.groupId;
         const oldFingerprint = messagingClient.fingerprint;
-
-        console.log('[revolution-addon] 📝 Captured old messaging state:', {
-          oldGroupId,
-          oldFingerprint: oldFingerprint?.substring(0, 16) + '...',
-          oldUserId: state.profile?.userId
-        });
 
         const disconnectPayload = {
           reason: 'profile_switch',
@@ -1260,7 +1098,6 @@ async function applyPendingProfile() {
         };
 
         await window.MessagingIntegration.sendMessage(disconnectPayload, 'client_disconnected');
-        console.log('[revolution-addon] ✅ client_disconnected message sent for profile switch to old group:', oldGroupId);
 
         // Give message some time to be delivered
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -1272,10 +1109,8 @@ async function applyPendingProfile() {
           ? window.getRevolutionScoring() : null;
         const tq = revolution?.privacyLayer?.transactionQueue;
         if (tq && typeof tq.sendDeviceHandoff === 'function') {
-          console.log('[revolution-addon] 📤 Sending device handoff before profile switch...');
           await tq.sendDeviceHandoff();
           await new Promise(resolve => setTimeout(resolve, 300));
-          console.log('[revolution-addon] ✅ Device handoff sent (profile switch)');
         }
       } catch (handoffError) {
         console.error('[revolution-addon] ❌ Failed to send device handoff on profile switch:', handoffError);
@@ -1285,7 +1120,6 @@ async function applyPendingProfile() {
       // Stop messaging for old profile
       if (typeof window.MessagingIntegration?.stopMessaging === 'function') {
         window.MessagingIntegration.stopMessaging();
-        console.log('[revolution-addon] 🛑 Messaging polling stopped for old profile');
       }
     } catch (error) {
       console.error('[revolution-addon] ❌ Failed to send disconnect message during profile switch:', error);
@@ -1335,7 +1169,6 @@ async function applyPendingProfile() {
     // NGO & Criteria Data (user-specific)
     'rev_ngo_criteria'
   ]);
-  console.log('[revolution-addon] 🗑️  User-specific data deleted for profile switch (fresh start with new profile)');
 
   if (typeof window.LogClient !== 'undefined') {
     window.LogClient.sendLog('browser-addon', 'user_login', 'User logged in', {
@@ -1368,8 +1201,6 @@ async function handleLogout() {
 
   // Send disconnect message to messaging group before logout
   try {
-    console.log('[revolution-addon] 📤 Sending client_disconnected message before logout...');
-
     const messagingClient = window.MessagingIntegration?.getClient();
     if (messagingClient && typeof window.MessagingIntegration?.sendMessage === 'function') {
       const disconnectPayload = {
@@ -1385,10 +1216,8 @@ async function handleLogout() {
           ? window.getRevolutionScoring() : null;
         const tq = revolution?.privacyLayer?.transactionQueue;
         if (tq && typeof tq.sendDeviceHandoff === 'function') {
-          console.log('[revolution-addon] 📤 Sending device handoff before logout...');
           await tq.sendDeviceHandoff();
           await new Promise(resolve => setTimeout(resolve, 300));
-          console.log('[revolution-addon] ✅ Device handoff sent (logout)');
         }
       } catch (handoffError) {
         console.error('[revolution-addon] ❌ Failed to send device handoff on logout:', handoffError);
@@ -1396,12 +1225,9 @@ async function handleLogout() {
       }
 
       await window.MessagingIntegration.sendMessage(disconnectPayload, 'client_disconnected');
-      console.log('[revolution-addon] ✅ client_disconnected message sent');
 
       // Give message some time to be delivered before stopping polling
       await new Promise(resolve => setTimeout(resolve, 500));
-    } else {
-      console.log('[revolution-addon] ⚠️ MessagingClient not available for disconnect message');
     }
   } catch (error) {
     console.error('[revolution-addon] ❌ Failed to send disconnect message:', error);
@@ -1412,7 +1238,6 @@ async function handleLogout() {
   try {
     if (typeof window.MessagingIntegration?.stopMessaging === 'function') {
       window.MessagingIntegration.stopMessaging();
-      console.log('[revolution-addon] 🛑 Messaging polling stopped');
     }
   } catch (error) {
     console.error('[revolution-addon] ❌ Failed to stop messaging:', error);
@@ -1429,8 +1254,6 @@ async function handleLogout() {
     });
     if (!revokeResponse.ok) {
       console.warn('[revolution-addon] ⚠️ Device revocation returned', revokeResponse.status);
-    } else {
-      console.log('[revolution-addon] ✅ Device revoked on server');
     }
   } catch (error) {
     console.warn('[revolution-addon] ⚠️ Device revocation failed (server unreachable):', error.message);
@@ -1488,7 +1311,6 @@ async function handleLogout() {
       await window.MessagingIntegration.clearAllData();
     }
 
-    console.log('[revolution-addon] 🗑️  All user-specific data deleted (clean state for next login)');
   } catch (error) {
     console.error('[revolution-addon] ❌ Failed to delete user data:', error);
   }
@@ -1499,10 +1321,8 @@ async function handleLogout() {
 browser.runtime.onInstalled.addListener(async (details) => {
   if (details.reason === 'install') {
     // Fresh install: wipe any leftover data from a previous installation
-    console.log('[revolution-addon] Fresh install detected – clearing all storage');
     try {
       await browser.storage.local.clear();
-      console.log('[revolution-addon] ✅ Storage cleared on fresh install');
     } catch (error) {
       console.error('[revolution-addon] ❌ Failed to clear storage on install:', error);
     }
@@ -1515,15 +1335,12 @@ browser.tabs.onRemoved.addListener((tabId) => {
 });
 
 browser.runtime.onStartup.addListener(async () => {
-  console.log('[revolution-addon] Addon startup - revoking old client for fresh messaging keys');
-
   // Revoke old client to force re-registration with new messaging keys
   // This is necessary because messaging keys are regenerated on each addon reload
   try {
     const state = await loadState();
     if (state && state.device && state.device.sessionToken) {
       const origin = state.origin || pickKnownOrigin();
-      console.log('[revolution-addon] Revoking old device on server...');
 
       try {
         await fetch(`${origin}/devices/current/revoke`, {
@@ -1533,9 +1350,8 @@ browser.runtime.onStartup.addListener(async () => {
             'Authorization': `Bearer ${state.device.sessionToken}`
           }
         });
-        console.log('[revolution-addon] Old device revoked successfully');
       } catch (error) {
-        console.log('[revolution-addon] Failed to revoke old client (server may be unreachable):', error.message);
+        console.warn('[revolution-addon] Failed to revoke old client (server may be unreachable):', error.message);
       }
 
       // Clear client context to force new claim
@@ -1546,7 +1362,6 @@ browser.runtime.onStartup.addListener(async () => {
         deviceError: null
       };
       await persistState(clearedState);
-      console.log('[revolution-addon] Client context cleared, will re-register on next sync');
     }
   } catch (error) {
     console.error('[revolution-addon] Error during startup client revocation:', error);
@@ -1587,30 +1402,15 @@ browser.runtime.onStartup.addListener(async () => {
  * Called after profile updates that might include a new wallet address
  */
 async function retryWalletInitIfNeeded() {
-  console.log('[DEBUG] 🔄 retryWalletInitIfNeeded called', {
-    _walletInitFailed: window._walletInitFailed,
-    _walletInitError: window._walletInitError,
-    _walletInitialized: window._walletInitialized
-  });
-
   if (window._walletInitialized) {
-    console.log('[DEBUG] ⏭️ Wallet already initialized, returning early');
     return;
   }
-
-  if (!window._walletInitFailed && !window._walletInitError) {
-    console.log('[DEBUG] ⏭️ No prior failure — checking storage for wallet anyway');
-    // Fall through: wallet may have arrived via ADDRESS_UPDATE after initial startup
-  }
-
-  console.log('[revolution-addon] 🔄 Retrying wallet initialization...');
 
   try {
     const state = await loadState();
 
     // Check if user is logged in (has valid userToken)
     if (!state || !state.userToken) {
-      console.log('[revolution-addon] ⚠️ Cannot retry wallet init - no user logged in');
       return;
     }
 
@@ -1620,15 +1420,12 @@ async function retryWalletInitIfNeeded() {
     const storedWallet = storageData.rev_cl_wallet;
 
     if (!storedWallet || !storedWallet.address || !storedWallet.privateKey) {
-      console.log('[revolution-addon] ⚠️ No wallet with private key in storage, cannot retry');
-      console.log('[revolution-addon] 💡 Please complete device registration to get wallet credentials');
       window._walletInitFailed = true;
       window._walletInitError = 'No wallet with private key in storage';
       return;
     }
 
     // Use wallet from browser storage (device registration)
-    console.log('[revolution-addon] 📦 Using wallet from browser storage (with private key)');
     const clWalletAddress = storedWallet.address;
     const privateKey = storedWallet.privateKey;
     const publicKey = storedWallet.publicKey;
@@ -1639,7 +1436,6 @@ async function retryWalletInitIfNeeded() {
 
     await initializeWalletSystem(clWalletAddress, privateKey, publicKey);
 
-    console.log('[revolution-addon] ✅ Wallet initialization retry successful!');
     notifyUser('✅ Wallet Ready', 'Wallet system is now available.');
 
   } catch (error) {
@@ -1660,21 +1456,6 @@ window.retryWalletInitIfNeeded = retryWalletInitIfNeeded;
  */
 async function initializeWalletSystem(clWalletAddress = null, privateKey = null, publicKey = null) {
   try {
-    console.log('[revolution-addon] 🔐 Initializing Wallet System...');
-    console.log('[revolution-addon] CL Wallet Address:', {
-      provided: !!clWalletAddress,
-      value: clWalletAddress ? clWalletAddress.substring(0, 20) + '...' : 'null/undefined',
-      length: clWalletAddress?.length || 0,
-      hasPrivateKey: !!privateKey,
-      hasPublicKey: !!publicKey
-    });
-    console.log('[revolution-addon] Dependencies:', {
-      RevolutionScoring: typeof window.getRevolutionScoring === 'function',
-      WalletManager: typeof window.WalletManager !== 'undefined',
-      AnonTransactionClient: typeof window.AnonTransactionClient !== 'undefined',
-      MessagingIntegration: typeof window.MessagingIntegration !== 'undefined',
-      messagingClient: !!window.MessagingIntegration?.getClient()
-    });
 
     // 1. Prüfe ob CL-Wallet verfügbar ist
     if (!clWalletAddress) {
@@ -1724,13 +1505,6 @@ async function initializeWalletSystem(clWalletAddress = null, privateKey = null,
 
     // 4. Initialisiere Wallet mit CL-Adresse aus Profile
     const wallet = await walletManager.initializeWallet(clWalletAddress, privateKey, publicKey);
-
-    console.log('[revolution-addon] ✅ Wallet initialized:', {
-      address: wallet.address.substring(0, 20) + '...',
-      createdAt: wallet.createdAt,
-      hasPrivateKey: !!wallet.privateKey,
-      hasPublicKey: !!wallet.publicKey
-    });
 
     // 5. Initialisiere AnonTransactionClient
     const anonClient = new window.AnonTransactionClient({
@@ -1784,15 +1558,12 @@ async function initializeWalletSystem(clWalletAddress = null, privateKey = null,
       }, 24 * 60 * 60 * 1000); // 24 Stunden
     }, msUntil3AM);
 
-    console.log('[revolution-addon] ✅ FingerprintSeedManager initialized with cleanup job');
-
     // 9. Hole TranslationFactorTracker vom RevolutionScoring (falls bereits initialisiert)
     let translationFactorTracker = null;
     if (typeof window.getRevolutionScoring === 'function') {
       const revolution = window.getRevolutionScoring();
       if (revolution?.distributionEngine?.translationFactorTracker) {
         translationFactorTracker = revolution.distributionEngine.translationFactorTracker;
-        console.log('[revolution-addon] ✅ TranslationFactorTracker obtained from DistributionEngine');
       }
     }
 
@@ -1804,13 +1575,12 @@ async function initializeWalletSystem(clWalletAddress = null, privateKey = null,
     window._translationFactorTracker = translationFactorTracker;
     window._walletInitialized = true;
 
-    console.log('[revolution-addon] ✅ Wallet System initialized successfully');
+    console.log('[revolution-addon] ✅ Wallet System initialized');
 
     // 9. Process any pending transactions that were queued before wallet was ready
     if (typeof window.getRevolutionScoring === 'function') {
       const revolution = window.getRevolutionScoring();
       if (revolution?.privacyLayer?.transactionQueue) {
-        console.log('[revolution-addon] Processing pending transactions after wallet init');
         await revolution.privacyLayer.transactionQueue.processPendingQueue();
       }
     }
@@ -1829,33 +1599,21 @@ async function initializeWalletSystem(clWalletAddress = null, privateKey = null,
 }
 
 async function initializeBackgroundScript() {
-  console.log('[background.js] 🚀 initializeBackgroundScript() CALLED');
   try {
-    console.log('[background.js] 📋 Inside try block, about to init DebugLogger');
     // 1. Initialisiere Debug Logger
     if (typeof DebugLogger !== 'undefined') {
       await DebugLogger.init();
-      console.log('[background.js] ✅ DebugLogger initialized');
-    } else {
-      console.log('[background.js] ⚠️ DebugLogger not available');
     }
 
     const state = await loadState();
 
     // 1.5 REVOLUTION SCORING - Initialize IMMEDIATELY (no delay!)
-    console.log('[revolution-addon] 🔍 Checking Revolution Scoring availability...');
-    console.log('[revolution-addon] 🔍 typeof getRevolutionScoring:', typeof window.getRevolutionScoring);
     try {
       if (typeof window.getRevolutionScoring === 'function') {
         const scoring = window.getRevolutionScoring();
         if (scoring) {
           // CRITICAL: Must call initialize() to set initialized = true!
           await scoring.initialize();
-          console.log('[revolution-addon] 🚀 Revolution Scoring initialized:', {
-            initialized: scoring.initialized,
-            hasDistributionEngine: !!scoring.distributionEngine,
-            hasPrivacyLayer: !!scoring.privacyLayer
-          });
         } else {
           console.warn('[revolution-addon] ⚠️ Revolution Scoring returned null');
         }
@@ -1870,12 +1628,10 @@ async function initializeBackgroundScript() {
     // Wait 3 seconds before making HTTP requests
     if (state && state.userToken) {
       setTimeout(() => {
-        console.log('[revolution-addon] 🔗 Starting delayed client context check...');
         const persistIntermediate = async (s) => persistState(s);
         ensureClientContext(state, persistIntermediate)
           .then(async (updatedState) => {
             await persistState(updatedState);
-            console.log('[revolution-addon] ✅ Client context ensured');
           })
           .catch(error => {
             console.warn('[revolution-addon] ⚠️ Client context check failed:', error.message);
@@ -1890,20 +1646,14 @@ async function initializeBackgroundScript() {
   // 3. MESSAGING - RE-ENABLED (delayed start to avoid blocking)
   setTimeout(async () => {
     try {
-      console.log('[revolution-addon] 🔄 Initializing Messaging System...');
       const state = await loadState();
       const userToken = state?.userToken;
 
       if (userToken) {
         initializeMessaging()
-          .then(() => {
-            console.log('[revolution-addon] ✅ Messaging System initialized');
-          })
           .catch(error => {
             console.error('[revolution-addon] ❌ Messaging init failed:', error.message);
           });
-      } else {
-        console.warn('[revolution-addon] ⚠️ No user token, skipping messaging init');
       }
     } catch (error) {
       console.error('[revolution-addon] ❌ Messaging init failed:', error.message);
@@ -1918,12 +1668,8 @@ async function initializeBackgroundScript() {
       const storedWallet = storageData.rev_cl_wallet;
 
       if (storedWallet && storedWallet.address && storedWallet.privateKey) {
-        console.log('[revolution-addon] 💰 Found stored wallet, initializing wallet system...');
         await initializeWalletSystem(storedWallet.address, storedWallet.privateKey, storedWallet.publicKey);
-        console.log('[revolution-addon] ✅ Wallet System initialized');
       } else {
-        console.log('[revolution-addon] 💰 No stored wallet found, skipping wallet initialization');
-
         // If device is linked but wallet is missing, request ADDRESS_UPDATE from website
         // This handles the case where the initial ADDRESS_UPDATE was missed (race condition)
         const state = await loadState();
@@ -1935,9 +1681,7 @@ async function initializeBackgroundScript() {
             try {
               const messagingClient = window.MessagingIntegration?.getClient();
               if (messagingClient && typeof window.MessagingIntegration?.sendMessage === 'function') {
-                console.log('[revolution-addon] 📤 Requesting ADDRESS_UPDATE from website (wallet missing)...');
                 await window.MessagingIntegration.sendMessage({ reason: 'wallet_missing' }, 'request_address_update');
-                console.log('[revolution-addon] ✅ ADDRESS_UPDATE request sent');
               }
             } catch (err) {
               console.warn('[revolution-addon] ⚠️ Failed to request ADDRESS_UPDATE:', err.message);
@@ -1962,7 +1706,6 @@ async function initializeBackgroundScript() {
           console.error('[revolution-addon] Session processing failed:', error);
         });
       };
-      console.log('[revolution-addon] ✅ Tracking System initialized');
     })
     .catch(error => {
       console.error('[revolution-addon] Tracking init failed:', error.message);
@@ -1979,12 +1722,10 @@ async function initializeBackgroundScript() {
     try {
       const messagingClient = window.MessagingIntegration?.getClient();
       if (messagingClient && messagingClient.authToken) {
-        console.log('[revolution-addon] 🔄 Refreshing group keys from server...');
         await messagingClient.fetchGroupKeys();
-        console.log('[revolution-addon] ✅ Group keys refreshed:', Object.keys(messagingClient.groupKeys).length);
       }
     } catch (error) {
-      console.log('[revolution-addon] ℹ️ Could not refresh group keys:', error.message);
+      // Non-critical: group keys may not be available yet
     }
   }, 2000);
 }
@@ -2108,9 +1849,7 @@ async function publishMessagingKeysToWebsite() {
       origin
     );
 
-    if (result.ok) {
-      console.log('[publishMessagingKeysToWebsite] Keys published successfully');
-    } else {
+    if (!result.ok) {
       console.warn('[publishMessagingKeysToWebsite] Failed:', result.error);
     }
 
@@ -2155,10 +1894,7 @@ async function requestTokenFromActiveTabs() {
 }
 
 browser.runtime.onMessage.addListener((message, sender) => {
-  console.log('[revolution-addon] 📨 Message received:', message.type);
-
   if (!message || !message.type) {
-    console.log('[revolution-addon] ⚠️ Invalid message, no type');
     return undefined;
   }
   if (message.type === 'PAGE_TOKEN') {
@@ -2201,20 +1937,6 @@ browser.runtime.onMessage.addListener((message, sender) => {
   if (message.type === 'DEBUG_WALLET') {
     return browser.storage.local.get(['rev_cl_wallet']).then(data => {
       const wallet = data.rev_cl_wallet;
-      console.log('[DEBUG_WALLET] Wallet storage state:', {
-        hasWallet: !!wallet,
-        hasAddress: !!wallet?.address,
-        hasPrivateKey: !!wallet?.privateKey,
-        addressPreview: wallet?.address ? wallet.address.substring(0, 20) + '...' : null,
-        receivedAt: wallet?.receivedAt ? new Date(wallet.receivedAt).toISOString() : null,
-        walletInitStatus: {
-          initialized: window._walletInitialized || false,
-          failed: window._walletInitFailed || false,
-          error: window._walletInitError || null,
-          hasWalletManager: !!window._walletManager,
-          hasAnonClient: !!window._anonClient
-        }
-      });
       return {
         hasWallet: !!wallet,
         hasAddress: !!wallet?.address,
@@ -2230,7 +1952,6 @@ browser.runtime.onMessage.addListener((message, sender) => {
     });
   }
   if (message.type === 'FETCH_AND_STORE_WALLET') {
-    console.log('[FETCH_AND_STORE_WALLET] Fetching wallet from server...');
     return loadState().then(async state => {
       if (!state || !state.userToken) {
         throw new Error('Not logged in - no user token');
@@ -2253,11 +1974,6 @@ browser.runtime.onMessage.addListener((message, sender) => {
         }
 
         const walletData = await response.json();
-        console.log('[FETCH_AND_STORE_WALLET] Wallet fetched:', {
-          hasAddress: !!walletData.address,
-          hasPrivateKey: !!walletData.privateKey,
-          addressPreview: walletData.address ? walletData.address.substring(0, 20) + '...' : null
-        });
 
         // Store wallet in browser storage
         await browser.storage.local.set({
@@ -2267,8 +1983,6 @@ browser.runtime.onMessage.addListener((message, sender) => {
             receivedAt: Date.now()
           }
         });
-
-        console.log('[FETCH_AND_STORE_WALLET] ✅ Wallet stored successfully');
 
         return {
           success: true,
@@ -2289,18 +2003,6 @@ browser.runtime.onMessage.addListener((message, sender) => {
       // Decode tokens
       const userPayload = state?.userToken ? decodeJwtPayload(state.userToken) : null;
       const sessionPayload = state?.client?.sessionToken ? decodeJwtPayload(state.device.sessionToken) : null;
-
-      console.log('[DEBUG] 🔍 Full Storage State:', {
-        hasUserToken: !!state?.userToken,
-        hasProfile: !!state?.profile,
-        hasClient: !!state?.client,
-        hasSessionToken: !!state?.client?.sessionToken,
-        deviceStatus: state?.clientStatus,
-        deviceError: state?.clientError,
-        profile: state?.profile,
-        userTokenPayload: userPayload,
-        sessionTokenPayload: sessionPayload
-      });
 
       return {
         hasUserToken: !!state?.userToken,
@@ -2380,7 +2082,6 @@ browser.runtime.onMessage.addListener((message, sender) => {
     })();
   }
   if (message.type === 'SIMULATE_TAB_CLOSE') {
-    console.log('[revolution-addon] 🎯 Simulating tab close for tab:', message.tabId);
     return handleSimulateTabClose(message.tabId);
   }
   // Tracking-bezogene Message-Handler
@@ -2408,18 +2109,12 @@ browser.runtime.onMessage.addListener((message, sender) => {
 
   // Handle device registration response from website
   if (message.type === 'DEVICE_REGISTRATION_RESPONSE') {
-    console.log('[revolution-addon] ✅ DEVICE_REGISTRATION_RESPONSE received:', {
-      status: message.status,
-      fingerprint: message.fingerprint,
-      hasData: !!message.data
-    });
     // IMPORTANT: Return undefined (not a Promise) so that the responseHandler
     // in claimInvite() can also receive and process this message
     // Multiple listeners need to handle this message
     return undefined;
   }
 
-  console.log('[revolution-addon] ⚠️ Unknown message type:', message.type);
   return undefined;
 });
 
@@ -2493,20 +2188,10 @@ async function checkClientStatus() {
  */
 async function handleSessionCompleted(sessionSummary) {
   try {
-    console.log('[revolution-addon] 📊 Processing completed session:', {
-      sessionId: sessionSummary.sessionId,
-      url: sessionSummary.url?.substring(0, 50),
-      activeTime: sessionSummary.metrics.activeTime.valueSeconds,
-      totalTime: sessionSummary.totalTimeSeconds
-    });
-
     // KEIN FILTER: Jede Session wird bewertet - auch Redirects bieten einen Dienst!
     // Mit 10^16 Tokens/Monat können auch Kleinstbeträge verteilt werden.
     // Der Score wird durch die Scoring-Engine entsprechend berechnet.
     // #TODO: Redirect-Services speziell analysieren und eigenes Rating-Schema entwickeln
-    const activeTimeSeconds = sessionSummary.metrics?.activeTime?.valueSeconds || 0;
-    console.log(`[revolution-addon] 📊 Session will be scored: total=${sessionSummary.totalTimeSeconds}s, active=${activeTimeSeconds}s`);
-
     // Log session ended
     if (typeof DebugLogger !== 'undefined') {
       DebugLogger.session.ended(sessionSummary.sessionId, sessionSummary);
@@ -2572,17 +2257,8 @@ async function handleSessionCompleted(sessionSummary) {
 
     // Hole Satisfaction Data für diese Session (NEU in v2.0.0)
     const satisfactionData = getSatisfactionData(sessionSummary.tabId);
-    if (satisfactionData) {
-      console.log('[revolution-addon] 📊 Using satisfaction data for scoring:', {
-        hasReadingBehavior: !!satisfactionData.readingBehavior,
-        hasFrustration: !!satisfactionData.frustration,
-        hasAttentionQuality: !!satisfactionData.attentionQuality,
-        hasExplicitFeedback: !!satisfactionData.explicitFeedback
-      });
-    }
 
     // Verarbeite Session durch RevolutionScoring
-    console.log('[revolution-addon] 🎯 Calling RevolutionScoring.processSession...');
     const result = await revolution.processSession(sessionData, pageData, satisfactionData);
 
     // Rating wurde verworfen (kein BA→CL Transfer)
@@ -2591,16 +2267,6 @@ async function handleSessionCompleted(sessionSummary) {
       console.warn('[revolution-addon] User must wait for first budget allocation interval');
       return;
     }
-
-    console.log('[revolution-addon] ✅ Session processed successfully:', {
-      score: result.scoring?.score,
-      tokens: result.distribution?.tokens?.toString(),
-      safetyFactor: result.distribution?.metadata?.safetyFactor,
-      payoutFactor: result.distribution?.metadata?.payoutFactor,
-      prognosisSF: result.distribution?.metadata?.prognosisSafetyFactor,
-      translationFactor: result.distribution?.metadata?.translationFactor,
-      daysSinceStart: result.distribution?.metadata?.daysSinceStart
-    });
 
     // Log successful scoring
     if (typeof DebugLogger !== 'undefined') {
@@ -2618,15 +2284,9 @@ async function handleSessionCompleted(sessionSummary) {
       const ratingRef = result.scoring?.metadata?.ratingRef; // ratingRef is in scoring.metadata, not distribution
 
       if (messagingClient && ratingRef) {
-        console.log('[revolution-addon] 📤 Sending rating message to website...');
         await sendRatingMessageToWebsite(result, sessionSummary, messagingClient, ratingRef);
-        console.log('[revolution-addon] ✅ Rating message sent successfully');
       } else {
-        console.warn('[revolution-addon] ⚠️ Cannot send rating message:', {
-          hasMessagingClient: !!messagingClient,
-          hasRatingRef: !!ratingRef,
-          scoringMetadata: result.scoring?.metadata ? Object.keys(result.scoring.metadata) : []
-        });
+        console.warn('[revolution-addon] ⚠️ Cannot send rating message: missing messagingClient or ratingRef');
       }
     } catch (error) {
       console.error('[revolution-addon] ❌ Failed to send rating message:', error);
@@ -2719,13 +2379,6 @@ async function uploadSessionToServer(sessionSummary, sessionToken) {
 const satisfactionDataStore = new Map(); // tabId -> satisfactionData
 
 async function handleSatisfactionData(message, sender) {
-  console.log('[revolution-addon] 📊 Satisfaction data received:', {
-    hasReadingBehavior: !!message.data?.readingBehavior,
-    hasFrustration: !!message.data?.frustration,
-    hasAttentionQuality: !!message.data?.attentionQuality,
-    tabId: sender.tab?.id
-  });
-
   const tabId = sender.tab?.id;
   if (!tabId) {
     console.warn('[revolution-addon] ⚠️ No tab ID in satisfaction data message');
@@ -2762,12 +2415,6 @@ async function handleSatisfactionData(message, sender) {
 const nativeRatingsStore = new Map(); // tabId -> rating
 
 async function handleNativeRating(message, sender) {
-  console.log('[revolution-addon] ⭐ Native rating detected:', {
-    rating: message.rating,
-    domain: message.domain,
-    tabId: sender.tab?.id
-  });
-
   const tabId = sender.tab?.id;
   if (!tabId) {
     console.warn('[revolution-addon] ⚠️ No tab ID in native rating message');
@@ -2833,8 +2480,6 @@ function cleanupSatisfactionData(tabId) {
 // ============================================================================
 
 async function handleSimulateTabClose(tabId) {
-  console.log('[revolution-addon] 🔄 handleSimulateTabClose called', { tabId });
-
   // Log simulation start
   if (typeof DebugLogger !== 'undefined') {
     DebugLogger.tracking.tabClosed(tabId);
@@ -2849,17 +2494,13 @@ async function handleSimulateTabClose(tabId) {
       throw new Error('Tracker not initialized');
     }
 
-    console.log('[revolution-addon] 🔄 Simulating tab close via tracker.handleTabClosed...');
     tracker.handleTabClosed(tabId);
-    console.log('[revolution-addon] ✅ Tab close simulated successfully');
 
     if (typeof DebugLogger !== 'undefined') {
       DebugLogger.success('tab_close_simulated', 'Tab close simulated successfully', { tabId });
     }
 
-    const response = { ok: true };
-    console.log('[revolution-addon] 📤 Returning response:', response);
-    return response;
+    return { ok: true };
   } catch (error) {
     console.error('[revolution-addon] ❌ Failed to simulate tab close:', error.message, error.stack);
 
@@ -2870,31 +2511,21 @@ async function handleSimulateTabClose(tabId) {
       });
     }
 
-    const errorResponse = { ok: false, error: error.message };
-    console.log('[revolution-addon] 📤 Returning error response:', errorResponse);
-    return errorResponse;
+    return { ok: false, error: error.message };
   }
 }
 
 async function initializeMessaging() {
-  console.log('[revolution-addon] 🔄 initializeMessaging called');
-
   try {
     if (typeof window.MessagingIntegration === 'undefined') {
       console.error('[revolution-addon] ❌ MessagingIntegration not available!');
       return;
     }
 
-    console.log('[revolution-addon] ✅ MessagingIntegration available');
-
     const state = await loadState();
     const userToken = state && state.userToken ? state.userToken : null;
 
-    console.log('[revolution-addon] 🔐 User token:', userToken ? 'PRESENT' : 'MISSING');
-
     await window.MessagingIntegration.initMessaging(userToken);
-
-    console.log('[revolution-addon] ✅ Messaging initialized successfully');
   } catch (error) {
     console.error('[revolution-addon] ❌ Failed to initialize messaging:', error.message, error.stack);
   }
@@ -2902,26 +2533,13 @@ async function initializeMessaging() {
 
 async function initializeRevolutionScoring() {
   try {
-    console.log('[revolution-addon] 🚀 Initializing Revolution Scoring System...');
-
-    // Prüfe ob RevolutionScoring verfügbar ist
     if (typeof window.getRevolutionScoring !== 'function') {
       console.error('[revolution-addon] ❌ RevolutionScoring not loaded!');
       return;
     }
 
-    // Hole oder erstelle RevolutionScoring Instanz
     const revolution = window.getRevolutionScoring();
-
-    // Initialisiere das System
     await revolution.initialize();
-
-    console.log('[revolution-addon] ✅ Revolution Scoring System initialized successfully');
-
-    // Hole Status für Debugging
-    const status = await revolution.getStatus();
-    console.log('[revolution-addon] 📊 Revolution Scoring Status:', status);
-
   } catch (error) {
     console.error('[revolution-addon] ❌ Failed to initialize Revolution Scoring:', error.message, error.stack);
   }
@@ -3055,7 +2673,6 @@ async function sendRatingMessageToWebsite(result, sessionSummary, messagingClien
 
     if (storage.website_keys && storage.website_keys.encryption_key) {
       actualWebsitePublicKey = storage.website_keys.encryption_key;
-      console.log('[revolution-addon] 🔑 Using encryption_key from ADDRESS_UPDATE (not config)');
     } else {
       console.warn('[revolution-addon] ⚠️ No website_keys in storage, using fallback config key');
     }
@@ -3071,14 +2688,6 @@ async function sendRatingMessageToWebsite(result, sessionSummary, messagingClien
 
     // Send to website via messaging service
     await sendToWebsiteOnly(messagingClient, encryptedMessage, actualWebsitePublicKey);
-
-    console.log('[revolution-addon] ✅ RATING_FULL sent to website:', {
-      ratingRef: ratingRef.substring(0, 20) + '...',
-      domain: fullPayload.domain,
-      tokens: fullPayload.tokens,
-      hasSeedCLtoSH: !!seedObj.seedCLtoSH,
-      hasSeedSHtoDS: !!seedObj.seedSHtoDS
-    });
 
     // Send RATING_SUMMARY to other devices
     try {
@@ -3149,21 +2758,12 @@ async function sendRatingSummaryToOtherDevices(messagingClient, seedObj, scoring
   );
 
   if (recipients.length === 0) {
-    console.log('[background.js] No other devices to send RATING_SUMMARY to');
     return { success: true, skipped: true };
   }
-
-  console.log(`[background.js] 📤 Sending RATING_SUMMARY to ${recipients.length} other device(s)...`);
 
   // Send using messagingClient.sendMessage (handles encryption, signing, etc.)
   // Use 'rating' type for messaging-service validation (rating_summary is internal payload type)
   await messagingClient.sendMessage(summaryPayload, 'rating', recipients);
-
-  console.log('[background.js] ✅ RATING_SUMMARY sent to other devices:', {
-    ratingRef: transaction.ratingRef.substring(0, 20) + '...',
-    recipientCount: recipients.length,
-    transactionCount: seedObj.transactionPairs.length
-  });
 
   return { success: true, recipientCount: recipients.length };
 }
@@ -3194,9 +2794,6 @@ async function sendToWebsiteOnly(messagingClient, payload, websitePublicKey) {
     const storage = await browser.storage.local.get(['website_keys']);
     if (storage.website_keys && storage.website_keys.messaging_address) {
       websiteMessagingAddress = storage.website_keys.messaging_address;
-      console.log('[revolution-addon] 🔑 Using website_keys from ADDRESS_UPDATE:', {
-        messagingAddress: websiteMessagingAddress.substring(0, 16) + '...'
-      });
     }
   } catch (e) {
     console.warn('[revolution-addon] ⚠️ Could not load website_keys from storage:', e.message);
@@ -3214,9 +2811,6 @@ async function sendToWebsiteOnly(messagingClient, payload, websitePublicKey) {
     // Check if website is in groupKeys
     if (messagingClient.groupKeys[websiteFingerprint]) {
       websiteMessagingAddress = websiteFingerprint;
-      console.log('[revolution-addon] 🔑 Using legacy fingerprint from groupKeys:', {
-        fingerprint: websiteFingerprint.substring(0, 16) + '...'
-      });
     }
   }
 

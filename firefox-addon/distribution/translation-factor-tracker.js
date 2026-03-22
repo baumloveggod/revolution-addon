@@ -52,12 +52,6 @@ class TranslationFactorTracker {
     // Faktor-Snapshot speichern (täglich)
     await this.saveDailyFactorSnapshot();
 
-    console.log('[TranslationFactorTracker] Rating added:', {
-      score,
-      domain,
-      ratingRef,
-      totalRatings: history.length
-    });
   }
 
   /**
@@ -101,8 +95,6 @@ class TranslationFactorTracker {
     const firstTransferTimestamp = await this.getFirstBaToCLTimestamp();
 
     if (firstTransferTimestamp === null) {
-      // Noch keine BA→CL Transaktion → Faktor = 0 (Tag 0 der Rampe)
-      console.log('[TranslationFactorTracker] No BA→CL transfer yet, factor = 0');
       return 0n;
     }
 
@@ -115,16 +107,6 @@ class TranslationFactorTracker {
 
     // Finaler Faktor mit Dämpfung
     const dampedFactor = BigInt(Math.floor(Number(baseFactor) * timeMultiplier));
-
-    console.log('[TranslationFactorTracker] Current factor calculated:', {
-      totalScore,
-      baseFactor: baseFactor.toString(),
-      millisSinceFirstTransfer,
-      daysSinceFirstTransfer: (millisSinceFirstTransfer / (24 * 60 * 60 * 1000)).toFixed(4),
-      timeMultiplier: timeMultiplier.toFixed(4),
-      dampedFactor: dampedFactor.toString(),
-      ratingCount: ratings.length
-    });
 
     return dampedFactor;
   }
@@ -144,11 +126,6 @@ class TranslationFactorTracker {
     }
 
     await this.storage.set({ rev_first_ba_to_cl_timestamp: timestamp });
-
-    console.log('[TranslationFactorTracker] First BA→CL transfer recorded:', {
-      timestamp,
-      date: new Date(timestamp * 1000).toISOString()
-    });
   }
 
   /**
@@ -187,12 +164,6 @@ class TranslationFactorTracker {
 
       // 3. Hole CL-Wallet-Adresse
       const wallet = await walletManager.getLocalWallet();
-      console.log('[TranslationFactorTracker] DEBUG: getLocalWallet() returned:', {
-        hasWallet: !!wallet,
-        walletAddress: wallet?.address,
-        walletKeys: wallet ? Object.keys(wallet) : null
-      });
-
       if (!wallet || !wallet.address) {
         // Wallet not initialized yet - this is a temporary state during startup
         // Don't pause scoring, just skip the BA→CL check for now
@@ -282,13 +253,6 @@ class TranslationFactorTracker {
 
     // Speichern
     await this.storage.set({ rev_translation_factor_history: history });
-
-    console.log('[TranslationFactorTracker] Daily snapshot saved:', {
-      timestamp: now,
-      factor: currentFactor.toString(),
-      totalScore,
-      historyLength: history.length
-    });
   }
 
   /**
@@ -340,7 +304,6 @@ class TranslationFactorTracker {
    */
   async clearOldData() {
     await this.storage.remove(['rev_rating_history_30d', 'rev_translation_factor_history']);
-    console.log('[TranslationFactorTracker] All data cleared');
   }
 }
 

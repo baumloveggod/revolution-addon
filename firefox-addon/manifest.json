@@ -53,14 +53,12 @@
     "storage",
     "tabs",
     "<all_urls>",
-    "http://localhost:3000/*",
-    "http://127.0.0.1:3000/*"
+    "https://api.lenkenhoff.de/*"
   ],
   "content_scripts": [
     {
       "matches": [
-        "http://localhost:3000/*",
-        "http://127.0.0.1:3000/*"
+        "https://api.lenkenhoff.de/*"
       ],
       "js": [
         "contentScript.js"
@@ -68,6 +66,9 @@
       "run_at": "document_idle",
       "all_frames": false
     }
+  ],
+  "web_accessible_resources": [
+    "dev-credentials.json"
   ],
   "browser_specific_settings": {
     "gecko": {

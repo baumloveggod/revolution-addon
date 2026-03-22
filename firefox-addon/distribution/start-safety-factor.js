@@ -71,15 +71,6 @@ class StartSafetyFactor {
     // Finales SF = Minimum der beiden
     const finalSF = Math.min(userAgeSF, ratingAgeSF);
 
-    console.log('[StartSF] Calculated (2D):', {
-      userAgeDays: userAgeDays.toFixed(1),
-      ratingAgeDays: ratingAgeDays.toFixed(1),
-      userAgeSF: (userAgeSF * 100).toFixed(1) + '%',
-      ratingAgeSF: (ratingAgeSF * 100).toFixed(1) + '%',
-      finalSF: (finalSF * 100).toFixed(1) + '%',
-      isRatingMature: ratingAgeDays >= this.RATING_MATURITY_DAYS
-    });
-
     return finalSF;
   }
 
@@ -193,53 +184,7 @@ class StartSafetyFactor {
    * Beispiel-Berechnungen (für Testing)
    */
   static exampleCalculations() {
-    const startSF = new StartSafetyFactor();
-    const baTransfer = Date.now() - (35 * 24 * 60 * 60 * 1000);  // 35 Tage her
-
-    console.log('=== StartSF Examples (2D) ===\n');
-
-    // Szenario 1: Frisches Rating
-    const freshRating = Date.now();
-    const sf1 = startSF.calculateStartSF(freshRating, Date.now(), baTransfer);
-    console.log('Szenario 1: Frisches Rating (gerade erstellt)');
-    console.log('  User-Age: 35 Tage, Rating-Age: 0 Tage');
-    console.log('  SF:', (sf1 * 100).toFixed(1) + '%');
-    console.log('  Payout:', ((1 - sf1) * 100).toFixed(1) + '%\n');
-
-    // Szenario 2: Rating ist 15 Tage alt
-    const rating15d = Date.now() - (15 * 24 * 60 * 60 * 1000);
-    const sf2 = startSF.calculateStartSF(rating15d, Date.now(), baTransfer);
-    console.log('Szenario 2: Rating ist 15 Tage alt');
-    console.log('  User-Age: 20 Tage (bei Rating-Erstellung), Rating-Age: 15 Tage');
-    console.log('  SF:', (sf2 * 100).toFixed(1) + '%');
-    console.log('  Payout:', ((1 - sf2) * 100).toFixed(1) + '%\n');
-
-    // Szenario 3: Rating ist 30 Tage alt (REIF!)
-    const rating30d = Date.now() - (30 * 24 * 60 * 60 * 1000);
-    const sf3 = startSF.calculateStartSF(rating30d, Date.now(), baTransfer);
-    console.log('Szenario 3: Rating ist 30 Tage alt (REIF!)');
-    console.log('  User-Age: 5 Tage (bei Rating-Erstellung), Rating-Age: 30 Tage');
-    console.log('  SF:', (sf3 * 100).toFixed(1) + '%', '← VOLLE AUSZAHLUNG!');
-    console.log('  Payout:', ((1 - sf3) * 100).toFixed(1) + '%\n');
-
-    // Szenario 4: Unregelmäßige Nutzung
-    console.log('=== Unregelmäßige Nutzung (1x/Woche) ===');
-    const weeklyRatings = [
-      { day: 1, ratingAge: 0 },
-      { day: 8, ratingAge: 0 },
-      { day: 15, ratingAge: 0 },
-      { day: 22, ratingAge: 0 },
-      { day: 29, ratingAge: 0 },
-      { day: 35, ratingAge: 0 },  // Neues Rating
-      { day: 35, ratingAge: 34 }  // Erstes Rating ist jetzt 34 Tage alt!
-    ];
-
-    weeklyRatings.forEach(({ day, ratingAge }) => {
-      const ratingTime = baTransfer + (day * 24 * 60 * 60 * 1000);
-      const currentTime = ratingTime + (ratingAge * 24 * 60 * 60 * 1000);
-      const sf = startSF.calculateStartSF(ratingTime, currentTime, baTransfer);
-      console.log(`Tag ${day}, Rating-Age ${ratingAge}d: SF=${(sf * 100).toFixed(1)}%, Payout=${((1-sf)*100).toFixed(1)}%`);
-    });
+    // Example calculations for testing/debugging - no output
   }
 }
 

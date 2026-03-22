@@ -17,7 +17,7 @@ import {
  */
 export class MessagingAdmin {
   constructor(options = {}) {
-    this.serviceUrl = options.serviceUrl || 'http://192.168.178.130:4200';
+    this.serviceUrl = options.serviceUrl || 'https://msg.lenkenhoff.de';
     this.authToken = options.authToken || null;
     this.adminKeyPair = null;
     this.adminSigningKeyPair = null;
@@ -77,9 +77,7 @@ export class MessagingAdmin {
         throw new Error(error.error || 'Add client failed');
       }
 
-      const data = await response.json();
-      console.log('Client added:', data);
-      return data;
+      return await response.json();
     } catch (error) {
       console.error('Add client error:', error);
       throw error;
@@ -112,9 +110,7 @@ export class MessagingAdmin {
         throw new Error(error.error || 'Remove client failed');
       }
 
-      const data = await response.json();
-      console.log('Client removed:', data);
-      return data;
+      return await response.json();
     } catch (error) {
       console.error('Remove client error:', error);
       throw error;
@@ -147,9 +143,7 @@ export class MessagingAdmin {
         throw new Error(error.error || 'Key rotation failed');
       }
 
-      const data = await response.json();
-      console.log('Key rotation initiated:', data);
-      return data;
+      return await response.json();
     } catch (error) {
       console.error('Key rotation error:', error);
       throw error;
@@ -263,9 +257,7 @@ export class MessagingAdmin {
       throw new Error(error.error || 'Key rotation message failed');
     }
 
-    const data = await response.json();
-    console.log('Key rotation message sent:', data);
-    return data;
+    return await response.json();
   }
 }
 

@@ -15,11 +15,8 @@
  * - Keine expliziten Phasen, nur mathematische Funktion
  */
 
-console.log('[DistributionEngine] 🔥 FILE BEING PARSED - Version 0.1.7');
-
 class DistributionEngine {
   constructor(config, prognosisModel, calibrationManager, privacyLayer, entityResolver = null) {
-    console.log('[DistributionEngine] 🔥 CONSTRUCTOR CALLED - Version 0.1.2');
     this.config = config;
     this.prognosisModel = prognosisModel;
     this.calibrationManager = calibrationManager;
@@ -36,13 +33,6 @@ class DistributionEngine {
       ? new window.FluctuationSafetyFactor()
       : null;
 
-    console.log('[DistributionEngine] Constructor - Safety Factor components initialized:', {
-      hasTracker: !!this.translationFactorTracker,
-      hasFluctuationSF: !!this.fluctuationSF,
-      hasWindow: typeof window !== 'undefined',
-      hasTrackerClass: typeof window !== 'undefined' && !!window.TranslationFactorTracker,
-      hasFluctuationClass: typeof window !== 'undefined' && !!window.FluctuationSafetyFactor
-    });
   }
 
   /**
@@ -121,13 +111,6 @@ class DistributionEngine {
     const domain = scoringResult.metadata.domain;
     const ratingRef = scoringResult.metadata?.ratingRef || `rating-${Date.now()}`;
 
-    console.log('[DistributionEngine] Adding rating to tracker BEFORE factor calculation:', {
-      hasTracker: !!this.translationFactorTracker,
-      score: scoringResult.score,
-      domain,
-      ratingRef
-    });
-
     if (this.translationFactorTracker) {
       await this.translationFactorTracker.addRating(
         scoringResult.score,
@@ -135,12 +118,6 @@ class DistributionEngine {
         ratingRef,
         Date.now()
       );
-
-      console.log('[DistributionEngine] ✅ Rating added to translation factor tracker:', {
-        score: scoringResult.score,
-        domain,
-        ratingRef
-      });
     } else {
       console.warn('[DistributionEngine] Cannot add rating - TranslationFactorTracker is null!');
     }
@@ -162,13 +139,6 @@ class DistributionEngine {
         fluctuationSafetyFactor = this.fluctuationSF.calculateFluctuationSF(factorHistory, daysSinceStart);
       }
 
-      console.log('[DistributionEngine] Translation Factor & Safety Factors (AFTER adding rating):', {
-        translationFactor: translationFactor.toString(),
-        prognosisSF: prognosisSafetyFactor,
-        fluctuationSF: fluctuationSafetyFactor,
-        factorHistoryLength: factorHistory.length,
-        daysSinceStart
-      });
     } else {
       console.warn('[DistributionEngine] TranslationFactorTracker not available, using fallback');
       // Fallback: Alte Logik (mit Prognosis Ratio)
@@ -194,16 +164,6 @@ class DistributionEngine {
     const payoutTokens = BigInt(Math.floor(Number(rawTokens) * combinedPayoutFactor));
     const bufferedTokens = rawTokens - payoutTokens;
 
-    console.log('[DistributionEngine] Combined Safety Factors:', {
-      startPayoutFactor: payoutFactor,
-      prognosisSF: prognosisSafetyFactor,
-      fluctuationSF: fluctuationSafetyFactor,
-      combinedPayoutFactor,
-      rawTokens: rawTokens.toString(),
-      payoutTokens: payoutTokens.toString(),
-      bufferedTokens: bufferedTokens.toString()
-    });
-
     // 4. E24-Standardisierung (Privacy!) - nur auf Auszahlung
     const standardizedTokens = this.privacyLayer && payoutTokens > 0n
       ? this.privacyLayer.standardizeTokenAmount(payoutTokens)
@@ -211,15 +171,7 @@ class DistributionEngine {
 
     // 5. Hole Wallet-Adresse für die Domain
     // domain wurde bereits oben deklariert (Zeile 142)
-    const walletAddress = await this.getWalletAddressForDomain(domain);
-
-    // 5a. Logging für Wallet-Adresse
-    console.log('[DistributionEngine] 📍 Wallet address resolved:', {
-      domain: domain,
-      walletAddress: walletAddress,
-      isPending: walletAddress.startsWith('pending:'),
-      isValid: walletAddress.startsWith('DS::') || walletAddress.startsWith('OR::')
-    });
+    const { address: walletAddress, isNewWallet } = await this._resolveWalletWithMeta(domain);
 
     // 5b. Warnung wenn keine gültige Wallet-Adresse
     if (walletAddress.startsWith('pending:')) {
@@ -236,6 +188,7 @@ class DistributionEngine {
     {
       const transaction = {
         walletAddress: walletAddress,
+        isNewWallet: isNewWallet,
         domain: domain,
         score: scoringResult.score,
         tokens: standardizedTokens,
@@ -324,10 +277,11 @@ class DistributionEngine {
         : payment.tokens;
 
       // Hole Wallet-Adresse
-      const walletAddress = await this.getWalletAddressForDomain(payment.domain);
+      const { address: walletAddress, isNewWallet } = await this._resolveWalletWithMeta(payment.domain);
 
       transactions.push({
         walletAddress: walletAddress, // On-Chain Ziel-Adresse
+        isNewWallet: isNewWallet,
         domain: payment.domain, // Für Analytics
         score: payment.score,
         tokens: standardizedTokens,
@@ -399,10 +353,11 @@ class DistributionEngine {
     if (this.privacyLayer) {
       for (const settlement of settlements) {
         // Hole Wallet-Adresse
-        const walletAddress = await this.getWalletAddressForDomain(settlement.domain);
+        const { address: walletAddress, isNewWallet } = await this._resolveWalletWithMeta(settlement.domain);
 
         await this.privacyLayer.queueTransaction({
           walletAddress: walletAddress, // On-Chain Ziel-Adresse
+          isNewWallet: isNewWallet,
           domain: settlement.domain, // Für Analytics
           tokens: settlement.deficit,
           type: 'month_end_correction',
@@ -456,24 +411,36 @@ class DistributionEngine {
    * 3. Speichert in Cache für zukünftige Verwendung
    */
   async getWalletAddressForDomain(domain, storage = browser.storage.local) {
-    const data = await storage.get(['rev_domain_wallets', 'rev_user_token']);
+    const result = await this._resolveWalletWithMeta(domain, storage);
+    return result.address;
+  }
+
+  /**
+   * Holt Wallet-Adresse mit Metadaten (inkl. is_new_wallet Flag)
+   * Wird für queueTransaction-Aufrufe verwendet um Timing-Angriffe zu verhindern
+   * @returns {Promise<{address: string, isNewWallet: boolean}>}
+   */
+  async _resolveWalletWithMeta(domain, storage = browser.storage.local) {
+    const data = await storage.get(['rev_domain_wallets', 'rev_user_token', 'rev_new_wallets']);
     const domainWallets = data.rev_domain_wallets || {};
+    const newWallets = data.rev_new_wallets || {};
     const userToken = data.rev_user_token;
 
     // 1. Prüfe Cache
-    let walletAddress = domainWallets[domain];
+    const cachedAddress = domainWallets[domain];
 
-    if (walletAddress) {
-      console.log('[DistributionEngine] Using cached wallet address for:', domain);
-      return walletAddress;
+    if (cachedAddress) {
+      const isNewWallet = this.entityResolver
+        ? this.entityResolver._isWalletStillNew(newWallets[domain])
+        : false;
+      return { address: cachedAddress, isNewWallet };
     }
 
     // 2. Nicht gecacht → von API holen (wenn EntityResolver verfügbar)
     if (this.entityResolver && userToken) {
       try {
-        console.log('[DistributionEngine] Fetching wallet address from API for:', domain);
-        walletAddress = await this.entityResolver.getAndCacheWalletAddress(domain, userToken, storage);
-        return walletAddress;
+        const resolved = await this.entityResolver.getAndCacheWalletAddress(domain, userToken, storage);
+        return resolved; // {address, isNewWallet}
       } catch (error) {
         console.error('[DistributionEngine] Failed to fetch wallet address from API:', error.message);
         // Fallback unten
@@ -495,7 +462,7 @@ class DistributionEngine {
       cachedDomains: Object.keys(domainWallets),
       hint: 'Domain muss über /entity/resolve registriert werden oder KEY_UPDATE Message empfangen'
     });
-    return `pending:${domain}`;
+    return { address: `pending:${domain}`, isNewWallet: false };
   }
 
   /**
@@ -509,11 +476,6 @@ class DistributionEngine {
     domainWallets[domain] = walletAddress;
 
     await storage.set({ rev_domain_wallets: domainWallets });
-
-    console.log('[DistributionEngine] Wallet address saved:', {
-      domain,
-      walletAddress: walletAddress.substring(0, 10) + '...'
-    });
   }
 
   /**
@@ -605,15 +567,9 @@ class DistributionEngine {
   }
 }
 
-console.log('[DistributionEngine] 🔥 CLASS DEFINITION COMPLETE - About to export');
-console.log('[DistributionEngine] typeof DistributionEngine:', typeof DistributionEngine);
-console.log('[DistributionEngine] typeof window:', typeof window);
-
 // Export für Browser-Extension (non-module)
 if (typeof window !== 'undefined') {
   window.DistributionEngine = DistributionEngine;
-  console.log('[DistributionEngine] ✅ EXPORTED to window.DistributionEngine');
-  console.log('[DistributionEngine] window.DistributionEngine is constructor?', typeof window.DistributionEngine === 'function');
 } else {
   console.warn('[DistributionEngine] ⚠️ window is undefined, cannot export');
 }

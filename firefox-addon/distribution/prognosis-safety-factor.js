@@ -63,48 +63,22 @@ class PrognosisSafetyFactor {
       const variancePenalty = Math.min(0.2, varianceRatio - this.VARIANCE_THRESHOLD);
       safetyFactor *= (1.0 - variancePenalty);
 
-      console.log('[PrognosisSF] High variance detected:', {
-        varianceRatio: varianceRatio.toFixed(4),
-        penalty: variancePenalty.toFixed(2),
-        adjustedSF: safetyFactor.toFixed(2)
-      });
     }
 
     // Regel 2: Fallender Trend → höherer Puffer
     if (trend < this.TREND_THRESHOLD) {
       const trendPenalty = Math.min(0.1, Math.abs(trend) - Math.abs(this.TREND_THRESHOLD));
       safetyFactor *= (1.0 - trendPenalty);
-
-      console.log('[PrognosisSF] Falling trend detected:', {
-        trend: (trend * 100).toFixed(1) + '%',
-        penalty: trendPenalty.toFixed(2),
-        adjustedSF: safetyFactor.toFixed(2)
-      });
     }
 
     // Regel 3: Sehr geringe Datenmenge → konservativer
     if (factorHistory.length < this.MIN_DATA_POINTS * 2) {
       const dataPenalty = 0.05 * (1 - (factorHistory.length / (this.MIN_DATA_POINTS * 2)));
       safetyFactor *= (1.0 - dataPenalty);
-
-      console.log('[PrognosisSF] Low data confidence:', {
-        dataPoints: factorHistory.length,
-        penalty: dataPenalty.toFixed(2),
-        adjustedSF: safetyFactor.toFixed(2)
-      });
     }
 
     // 6. Begrenzen auf MIN/MAX
     safetyFactor = Math.max(this.MIN_SAFETY_FACTOR, Math.min(this.MAX_SAFETY_FACTOR, safetyFactor));
-
-    console.log('[PrognosisSF] Final calculation:', {
-      ewma: ewma.toFixed(2),
-      mean: stats.mean.toFixed(2),
-      stdDev: stats.stdDev.toFixed(2),
-      trend: (trend * 100).toFixed(1) + '%',
-      prognosis: prognosis.toFixed(2),
-      safetyFactor: safetyFactor.toFixed(4)
-    });
 
     return safetyFactor;
   }

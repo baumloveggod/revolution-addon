@@ -45,12 +45,10 @@ class ScoringEngine {
     const useSatisfactionScoring = this.satisfactionScorer && hasSatisfactionData;
 
     if (useSatisfactionScoring) {
-      console.log('[ScoringEngine] Using v2.0.0 Enhanced Satisfaction Scoring');
       return this.scoreSessionWithSatisfaction(sessionData, pageData, additionalData);
     }
 
     // Fallback to v1.0.0 scoring (without satisfaction metrics)
-    console.log('[ScoringEngine] Using v1.0.0 Classic Scoring (no satisfaction data)');
 
     // 1. Content-Typ Erkennung
     const contentType = this.contentDetector.detectContentType(pageData);

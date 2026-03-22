@@ -4,8 +4,6 @@
  * Non-module version for Firefox addon background scripts
  */
 
-console.log('[MessagingCrypto] Script loading...');
-
 // Wrap in IIFE to avoid global variable conflicts
 (function() {
   if (typeof window.MessagingCrypto === 'undefined') {
@@ -17,7 +15,7 @@ console.log('[MessagingCrypto] Script loading...');
     // Only log errors and warnings
     if (operation.includes('❌') || operation.includes('⚠️')) {
       const timestamp = new Date().toISOString();
-      console.log(`[${timestamp}] [MessagingCrypto] ${operation}`, data);
+      console.error(`[${timestamp}] [MessagingCrypto] ${operation}`, data);
 
       // Send to logging service if available
       if (typeof window.LogClient !== 'undefined' && window.LogClient.sendLog) {
@@ -177,5 +175,4 @@ console.log('[MessagingCrypto] Script loading...');
     return sodium.to_base64(nonce);
   };
 
-  console.log('[MessagingCrypto] ✅ Script loaded successfully');
 })();

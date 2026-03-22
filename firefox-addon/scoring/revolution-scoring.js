@@ -36,8 +36,6 @@ class RevolutionScoring {
       return;
     }
 
-    console.log('[RevolutionScoring] Initializing...');
-
     // 1. Scoring Engine
     this.scoringEngine = window.createScoringEngine(this.config);
 
@@ -78,8 +76,6 @@ class RevolutionScoring {
     this.setupTransactionExecutor();
 
     this.initialized = true;
-
-    console.log('[RevolutionScoring] Initialized successfully');
   }
 
   /**
@@ -97,10 +93,31 @@ class RevolutionScoring {
       additionalData
     );
 
-    console.log('[RevolutionScoring] Session scored:', {
-      score: scoringResult.score,
-      domain: scoringResult.metadata.domain
-    });
+    // 1b. Apply per-domain feedback preference (if any)
+    const domain = scoringResult.metadata && scoringResult.metadata.domain;
+    if (domain && scoringResult.score > 0) {
+      try {
+        // Use browser.storage.local directly here (firefox-addon context).
+        // When extracted to the core module, replace with StorageAdapter.get().
+        const stored = await browser.storage.local.get('domain_preferences');
+        const prefs = stored['domain_preferences'] || {};
+        if (prefs[domain]) {
+          const factor = prefs[domain].adjustmentFactor;
+          const adjusted = Math.max(0, Math.min(this.scoringEngine.config.scores.MAX_SCORE,
+            Math.floor(scoringResult.score * factor)));
+          scoringResult.breakdown = scoringResult.breakdown || {};
+          scoringResult.breakdown.domainPreference = {
+            domain,
+            adjustmentFactor: factor,
+            feedbackCount: prefs[domain].feedbackCount,
+            applied: true,
+          };
+          scoringResult.score = adjusted;
+        }
+      } catch (_) {
+        // Non-critical: proceed without domain adjustment
+      }
+    }
 
     // 2. Speichere Score historisch
     await this.saveHistoricalScore(scoringResult);
@@ -119,6 +136,9 @@ class RevolutionScoring {
           // Central Ledger nicht erreichbar → Rating pausieren
           console.error('[RevolutionScoring] ⏸️ Rating paused - Central Ledger not reachable:', transferCheck.error);
           throw new Error(`Rating paused: ${transferCheck.error}`);
+        } else if (transferCheck.error && transferCheck.error.includes('not initialized')) {
+          // Wallet noch nicht bereit (ADDRESS_UPDATE ausstehend) → Rating überspringen, nicht verwerfen
+          console.warn('[RevolutionScoring] ⏳ Wallet not ready yet, skipping BA→CL check for this rating');
         } else {
           // Kein BA→CL Transfer gefunden → Rating verwerfen
           console.warn('[RevolutionScoring] ❌ Rating discarded - No BA→CL transfer found yet');
@@ -127,7 +147,6 @@ class RevolutionScoring {
         }
       }
 
-      console.log('[RevolutionScoring] ✅ BA→CL transfer confirmed - proceeding with rating');
     } else {
       console.warn('[RevolutionScoring] ⚠️ Cannot check BA→CL transfer - WalletManager or TranslationFactorTracker not available');
     }
@@ -142,12 +161,6 @@ class RevolutionScoring {
       scoringResult.metadata.url
     );
 
-    console.log('[RevolutionScoring] Fingerprint seeds generated:', {
-      ratingRef,
-      seedCLtoSHPreview: seedObj.seedCLtoSH.substring(0, 16) + '...',
-      seedSHtoDSPreview: seedObj.seedSHtoDS.substring(0, 16) + '...'
-    });
-
     // Füge Seeds zu metadata hinzu (verfügbar für Transaktionen)
     scoringResult.metadata.ratingRef = ratingRef;
     scoringResult.metadata.seedCLtoSH = seedObj.seedCLtoSH;
@@ -159,14 +172,6 @@ class RevolutionScoring {
       scoringResult,
       userData
     );
-
-    console.log('[RevolutionScoring] Distribution calculated:', {
-      tokens: distributionResult.tokens ? distributionResult.tokens.toString() : '0',
-      safetyFactor: distributionResult.metadata?.safetyFactor,
-      payoutFactor: distributionResult.metadata?.payoutFactor,
-      daysSinceStart: distributionResult.metadata?.daysSinceStart,
-      ratingRef: ratingRef
-    });
 
     // 6. Verwerfe Ratings mit Score 0 oder ohne Tokens (vor BA→CL Contract-Aktivierung)
     const hasValidScore = scoringResult.score > 0;
@@ -210,18 +215,9 @@ class RevolutionScoring {
    * Führt Transaktion aus (sendet Bewertungsdaten verschlüsselt an Website)
    */
   async executeTransaction(transaction) {
-    console.log('[RevolutionScoring] Executing transaction:', {
-      walletAddress: transaction.walletAddress?.substring(0, 10) + '...',
-      domain: transaction.domain,
-      tokens: transaction.tokens.toString(),
-      type: transaction.type
-    });
-
     try {
       // Sende Bewertungsdaten verschlüsselt über Messaging-Client an Website
       await this.sendRatingToWebsite(transaction);
-
-      console.log('[RevolutionScoring] Transaction rating sent successfully');
 
       // Tracking: Speichere bezahlte Beträge
       await this.distributionEngine.savePaidAmount(
@@ -348,20 +344,11 @@ class RevolutionScoring {
       calibration_day: this.distributionEngine?.getCalibrationDay?.() || 0
     };
 
-    console.log('[RevolutionScoring] Sending rating to website:', {
-      transactionRef,
-      walletAddress: transaction.walletAddress?.substring(0, 10) + '...',
-      domain: transaction.domain,
-      tokensPreview: transaction.tokens.toString().substring(0, 10) + '...'
-    });
-
     // Konvertiere alle BigInt-Werte zu Strings für JSON-Serialisierung
     const serializedPayload = this.convertBigIntsToStrings(ratingPayload);
 
     // Sende verschlüsselte Nachricht an Website (type: 'rating' für rating messages)
     await messagingClient.sendMessage(serializedPayload, 'rating');
-
-    console.log('[RevolutionScoring] Rating sent successfully:', transactionRef);
   }
 
   /**
@@ -424,21 +411,11 @@ class RevolutionScoring {
       return;
     }
 
-    console.log('[RevolutionScoring] Using existing rating seeds:', {
-      ratingRef,
-      seedCLtoSHPreview: seedCLtoSH.substring(0, 16) + '...',
-      seedSHtoDSPreview: seedSHtoDS.substring(0, 16) + '...'
-    });
-
     // Hole Wallet-Adresse für die Domain (auch bei Zero-Token)
     const domain = scoringResult.metadata.domain;
     let walletAddress = null;
     try {
       walletAddress = await this.distributionEngine.getWalletAddressForDomain(domain);
-      console.log('[RevolutionScoring] Wallet address fetched for zero-token rating:', {
-        domain,
-        walletAddress: walletAddress?.substring(0, 16) + '...'
-      });
     } catch (error) {
       console.error('[RevolutionScoring] Failed to fetch wallet address:', error.message);
       // Continue with null - non-blocking error
@@ -532,15 +509,6 @@ class RevolutionScoring {
       occurred_at: new Date().toISOString()
     };
 
-    console.log('[RevolutionScoring] Sending rating without transaction to website:', {
-      ratingRef,
-      domain: scoringResult.metadata.domain,
-      score: scoringResult.score,
-      safetyFactor: distributionResult.metadata?.safetyFactor,
-      payoutFactor: distributionResult.metadata?.payoutFactor,
-      daysSinceStart: distributionResult.metadata?.daysSinceStart
-    });
-
     // Debug logging
     if (typeof DebugLogger !== 'undefined') {
       DebugLogger.info('rating_prepare', 'Preparing RATING message (no transaction)', {
@@ -557,7 +525,6 @@ class RevolutionScoring {
       const serializedPayload = this.convertBigIntsToStrings(ratingPayload);
 
       await messagingClient.sendMessage(serializedPayload, 'rating');
-      console.log('[RevolutionScoring] Rating sent successfully:', ratingRef);
 
       // Debug logging - SUCCESS
       if (typeof DebugLogger !== 'undefined') {
@@ -615,7 +582,6 @@ class RevolutionScoring {
     await this.criteriaMatcher.loadCriteriaDatabase();
     await this.orWalletManager.loadWallets();
 
-    console.log('[RevolutionScoring] State loaded from storage');
   }
 
   /**
@@ -626,7 +592,6 @@ class RevolutionScoring {
     await this.criteriaMatcher.saveCriteriaDatabase();
     await this.orWalletManager.saveWallets();
 
-    console.log('[RevolutionScoring] State saved to storage');
   }
 
   /**
@@ -646,11 +611,6 @@ class RevolutionScoring {
 
     // Speichere Ergebnis
     await this.calibrationManager.saveCalibrationResult(result);
-
-    console.log('[RevolutionScoring] Calibration settlement executed:', {
-      totalScore: result.totalScore,
-      domainCount: result.domainPayments.length
-    });
 
     return result;
   }
@@ -676,11 +636,6 @@ class RevolutionScoring {
       monthData,
       userPreferences
     );
-
-    console.log('[RevolutionScoring] Month-end settlement executed:', {
-      totalScore: result.totalScore,
-      settlementCount: result.settlements.length
-    });
 
     return result;
   }
