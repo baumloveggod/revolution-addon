@@ -138,7 +138,8 @@ class RevolutionScoring {
           throw new Error(`Rating paused: ${transferCheck.error}`);
         } else if (transferCheck.error && transferCheck.error.includes('not initialized')) {
           // Wallet noch nicht bereit (ADDRESS_UPDATE ausstehend) → Rating überspringen, nicht verwerfen
-          console.warn('[RevolutionScoring] ⏳ Wallet not ready yet, skipping BA→CL check for this rating');
+          console.warn('[RevolutionScoring] ⏳ Wallet not ready yet, skipping rating entirely');
+          return null;
         } else {
           // Kein BA→CL Transfer gefunden → Rating verwerfen
           console.warn('[RevolutionScoring] ❌ Rating discarded - No BA→CL transfer found yet');

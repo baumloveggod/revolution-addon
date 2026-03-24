@@ -234,12 +234,12 @@ class TransactionQueue {
       }
 
       // 3c. Verify DS wallet is registered in Central Ledger (remote validation)
-      // Retry once after 600ms to handle race condition where wallet was just registered
-      // and the read store hasn't replicated it yet.
+      // Retry with backoff to handle race condition where wallet was just registered
+      // and the read store hasn't replicated yet (poll interval = 500ms).
       try {
         let registrationCheck = await this.anonClient.checkWalletRegistration(transaction.walletAddress);
         if (!registrationCheck.registered) {
-          await new Promise(resolve => setTimeout(resolve, 600));
+          await new Promise(resolve => setTimeout(resolve, 1500));
           registrationCheck = await this.anonClient.checkWalletRegistration(transaction.walletAddress);
         }
         if (!registrationCheck.registered) {
@@ -266,9 +266,10 @@ class TransactionQueue {
         );
 
       // 3.7. New-wallet timing protection: delay mint to break DS registration correlation
+      // DEV: reduced to seconds; restore 2–15 min for production
       if (transaction.isNewWallet) {
-        const minDelayMs = 2 * 60 * 1000;   // 2 minutes
-        const maxDelayMs = 15 * 60 * 1000;  // 15 minutes
+        const minDelayMs = 2 * 1000;   // 2 seconds (prod: 2 min)
+        const maxDelayMs = 5 * 1000;   // 5 seconds (prod: 15 min)
         const delayMs = minDelayMs + Math.floor(Math.random() * (maxDelayMs - minDelayMs));
         await this._sleep(delayMs);
       }
