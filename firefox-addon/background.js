@@ -1318,6 +1318,9 @@ async function handleLogout() {
   return { ok: true };
 }
 
+// Expose for messaging-integration.js (account_deleted system message)
+window.performLogout = handleLogout;
+
 browser.runtime.onInstalled.addListener(async (details) => {
   if (details.reason === 'install') {
     // Fresh install: wipe any leftover data from a previous installation

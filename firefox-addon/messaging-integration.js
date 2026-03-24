@@ -263,6 +263,9 @@ function handleMessage(message) {
     case 'feedback':
       handleFeedbackMessage(message.payload);
       break;
+    case 'account_deleted':
+      handleAccountDeleted();
+      break;
     default:
       console.warn('[MessagingIntegration] ⚠️ Unknown message type:', message.type);
   }
@@ -733,6 +736,38 @@ async function handleKeyRotation(payload) {
   } catch (error) {
     console.error('[MessagingIntegration] ❌ Failed to handle key_rotation:', error.message, error.stack);
     showNotification('⚠️ Fehler', 'Konnte Schlüssel-Rotation nicht verarbeiten');
+  }
+}
+
+/**
+ * Handle account_deleted system message from server.
+ * Stops polling, clears all local state and storage — equivalent to a forced logout.
+ */
+async function handleAccountDeleted() {
+  console.warn('[MessagingIntegration] 🗑️ account_deleted received — clearing addon state');
+
+  // Stop polling immediately so no further requests go out
+  if (messagingClient) {
+    messagingClient.stopPolling();
+  }
+
+  showNotification('Konto gelöscht', 'Dein Konto wurde gelöscht. Du wirst abgemeldet.');
+
+  try {
+    // Delegate full logout to background.js if available
+    if (typeof window.performLogout === 'function') {
+      await window.performLogout();
+    } else {
+      // Fallback: clear state directly
+      if (typeof window.persistState === 'function' && typeof window.createState === 'function') {
+        await window.persistState(window.createState({}));
+      }
+      if (typeof window.MessagingIntegration?.clearAllData === 'function') {
+        await window.MessagingIntegration.clearAllData();
+      }
+    }
+  } catch (err) {
+    console.error('[MessagingIntegration] ❌ handleAccountDeleted cleanup failed:', err.message);
   }
 }
 
