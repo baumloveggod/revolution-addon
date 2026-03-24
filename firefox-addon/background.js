@@ -2273,7 +2273,7 @@ async function handleSessionCompleted(sessionSummary) {
       DebugLogger.session.scored(
         sessionSummary.sessionId,
         result.scoring?.score,
-        result.distribution?.metadata
+        result.scoring?.metadata
       );
     }
 
