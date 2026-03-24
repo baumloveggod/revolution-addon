@@ -102,8 +102,8 @@ class TranslationFactorTracker {
     const millisSinceFirstTransfer = now - (firstTransferTimestamp * 1000); // firstTransferTimestamp ist in Sekunden
     const thirtyDaysInMillis = 30 * 24 * 60 * 60 * 1000; // Millisekunden
 
-    // timeMultiplier: 0.0 → 1.0 über 30 Tage
-    const timeMultiplier = Math.min(1.0, millisSinceFirstTransfer / thirtyDaysInMillis);
+    // timeMultiplier: 0.001 → 1.0 über 30 Tage (Minimum damit erster Rating nicht blockiert wird)
+    const timeMultiplier = Math.max(0.001, Math.min(1.0, millisSinceFirstTransfer / thirtyDaysInMillis));
 
     // Finaler Faktor mit Dämpfung
     const dampedFactor = BigInt(Math.floor(Number(baseFactor) * timeMultiplier));
