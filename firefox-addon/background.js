@@ -1086,12 +1086,12 @@ async function applyPendingProfile() {
       if (messagingClient && typeof window.MessagingIntegration?.sendMessage === 'function') {
         // IMPORTANT: Capture old groupId BEFORE any state changes
         const oldGroupId = messagingClient.groupId;
-        const oldFingerprint = messagingClient.fingerprint;
+        const oldMessagingAddress = messagingClient.messagingAddress;
 
         const disconnectPayload = {
           reason: 'profile_switch',
           clientId: state.device?.clientId,
-          fingerprint: oldFingerprint,
+          messagingAddress: oldMessagingAddress,
           oldUserId: state.profile?.userId,
           newUserId: state.pendingSwitch.profile?.userId,
           timestamp: Date.now()
@@ -1206,7 +1206,7 @@ async function handleLogout() {
       const disconnectPayload = {
         reason: 'logout',
         clientId: state.device?.clientId,
-        fingerprint: messagingClient.fingerprint,
+        messagingAddress: messagingClient.messagingAddress,
         timestamp: Date.now()
       };
 
