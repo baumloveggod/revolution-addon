@@ -174,6 +174,11 @@
 
       messagingClient.onError = (error) => {
         console.error('[MessagingIntegration] ❌ onError triggered:', error.message);
+        // If the messaging service no longer recognizes us, the device was revoked server-side
+        // (e.g. account deleted). Treat this the same as an account_deleted message.
+        if (error.code === 'NOT_REGISTERED') {
+          handleAccountDeleted();
+        }
       };
 
       // Start polling (client already registered during claim flow)
