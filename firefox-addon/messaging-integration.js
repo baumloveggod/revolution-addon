@@ -392,7 +392,7 @@ async function handleRatingSummaryMessage(payload) {
 
     // Leite CL→SH Fingerprints aus Seed ab
     const fingerprints = [];
-    const seedManager = new window.FingerprintSeedManager();
+    const seedManager = new window.FingerprintSeedManager({ storage: browser.storage.local });
 
     for (let i = 0; i < payload.transactionIndices.length; i++) {
       const index = payload.transactionIndices[i];
@@ -660,6 +660,30 @@ async function handleAddressUpdate(payload) {
         await window.persistState(updatedState);
       } else {
         console.warn('[MessagingIntegration] ⚠️ persistState function not available');
+      }
+    }
+
+    // Update messagingClient.groupKeys so TransactionQueue can find the website (role: "admin")
+    if (messagingClient && data.website?.messaging_address) {
+      messagingClient.groupKeys = messagingClient.groupKeys || {};
+
+      // Website as admin
+      messagingClient.groupKeys[data.website.messaging_address] = {
+        publicKey: data.website.encryption_key,
+        signingPublicKey: data.website.messaging_address,
+        role: 'admin'
+      };
+
+      // Other devices (excluding self)
+      const myAddr = messagingClient.messagingAddress;
+      for (const device of (data.devices || [])) {
+        if (device.messaging_address && device.messaging_address !== myAddr) {
+          messagingClient.groupKeys[device.messaging_address] = {
+            publicKey: device.encryption_key,
+            signingPublicKey: device.messaging_address,
+            role: 'device'
+          };
+        }
       }
     }
 
