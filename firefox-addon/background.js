@@ -370,10 +370,13 @@ async function claimInvite(origin, inviteToken, userToken) {
   }
 
   // Initialize messaging client ALWAYS before claim with the userToken
-  // This generates keys locally even if messaging server is offline
+  // This generates keys locally even if messaging server is offline.
+  // IMPORTANT: Stop polling immediately — the server doesn't know these keys yet.
+  // Polling will be started by persistState() once deviceStatus === 'linked'.
   let messagingKeys = null;
   try {
     await window.MessagingIntegration.initMessaging(userToken, origin);
+    window.MessagingIntegration.getClient()?.stopPolling();
 
     const info = window.MessagingIntegration.getMessagingInfo();
     // Binary Model: messagingAddress = signingPublicKey, encryptionKey = publicKey
