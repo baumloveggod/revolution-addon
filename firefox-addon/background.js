@@ -1628,6 +1628,13 @@ async function initializeBackgroundScript() {
 
     const state = await loadState();
 
+    // CRITICAL: Set isLinked IMMEDIATELY before any persistState call can trigger initMessaging.
+    // persistState() calls initMessaging() which starts polling — if isLinked is not set yet,
+    // a NOT_REGISTERED response will be silently ignored instead of triggering account deletion.
+    if (state?.deviceStatus === 'linked') {
+      window.MessagingIntegration?.setLinked?.();
+    }
+
     // 1.5 REVOLUTION SCORING - Initialize IMMEDIATELY (no delay!)
     try {
       if (typeof window.getRevolutionScoring === 'function') {
@@ -1671,11 +1678,6 @@ async function initializeBackgroundScript() {
       const userToken = state?.userToken;
 
       if (userToken) {
-        // If device is already linked, mark as linked before messaging init
-        // so that NOT_REGISTERED errors are correctly treated as revocation
-        if (state?.deviceStatus === 'linked') {
-          window.MessagingIntegration?.setLinked?.();
-        }
         initializeMessaging()
           .catch(error => {
             console.error('[revolution-addon] ❌ Messaging init failed:', error.message);
