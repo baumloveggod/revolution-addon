@@ -311,6 +311,17 @@ async function fetchJson(url, options = {}) {
     const error = new Error(errorMessage);
     error.status = response.status;
     error.data = data;
+
+    // Auto-logout: User existiert nicht mehr in der DB
+    const isAuthenticatedRequest = options.headers && (
+      options.headers['Authorization'] || options.headers['authorization']
+    );
+    const isUserGone = response.status === 401 && data?.error === 'account_not_found';
+    if (isAuthenticatedRequest && isUserGone) {
+      console.warn('[revolution-addon] account_not_found → auto-logout');
+      persistState(createState({})).catch(() => {});
+    }
+
     throw error;
   }
   return data;
