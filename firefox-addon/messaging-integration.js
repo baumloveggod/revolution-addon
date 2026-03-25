@@ -182,9 +182,12 @@
         // NOT_REGISTERED just means the server hasn't processed the registration yet.
         if (error.code === 'NOT_REGISTERED') {
           if (isLinked) {
+            // Device was registered but got revoked server-side → full logout
+            messagingClient.stopPolling();
             handleAccountDeleted();
           } else {
-            console.warn('[MessagingIntegration] ⚠️ NOT_REGISTERED but device not yet linked — ignoring');
+            // Device not yet linked — keep polling, ADDRESS_UPDATE will arrive after registration
+            console.warn('[MessagingIntegration] ⚠️ NOT_REGISTERED but device not yet linked — continuing to poll');
           }
         }
       };

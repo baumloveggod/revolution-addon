@@ -432,12 +432,13 @@ window.MessagingClient.prototype.poll = async function() {
 
       // Check if client is not registered (403 NOT_REGISTERED)
       if (response.status === 403 && errorData.error === 'NOT_REGISTERED') {
-        this.debugLog('🛑 Client not registered - stopping polling', { messagingAddress: this.messagingAddress?.substring(0, 16) + '...' });
-        this.stopPolling();
         const notRegisteredError = new Error('Client not registered with messaging service. Please re-register.');
         notRegisteredError.code = 'NOT_REGISTERED';
-        notRegisteredError.stopPolling = true;
+        // Let onError decide whether to stop polling (linked device = revoked → stop,
+        // unlinked device = waiting for registration → keep polling)
         if (this.onError) this.onError(notRegisteredError);
+        // Only stop polling if onError didn't handle it as a "still registering" case
+        // i.e. if the error handler calls stopPolling() itself
         throw notRegisteredError;
       }
 
