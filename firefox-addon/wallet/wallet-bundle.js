@@ -907,11 +907,8 @@
       const bodyHash    = await this.sha256Hash(bodyStr);
       const sigMessage  = `POST|${path}|${nonce}|${txTimestamp}|${bodyHash}`;
 
-      // Derive Ed25519 keypair from 32-byte seed (private key stored as base64)
-      const seedUint8 = sodium.from_base64(
-        clWallet.privateKey,
-        sodium.base64_variants.ORIGINAL
-      );
+      // Derive Ed25519 keypair from 32-byte seed (private key stored as hex)
+      const seedUint8 = sodium.from_hex(clWallet.privateKey);
       const keypair   = sodium.crypto_sign_seed_keypair(seedUint8);
 
       // Sign the canonical message

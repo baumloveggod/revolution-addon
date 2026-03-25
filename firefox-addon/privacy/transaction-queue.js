@@ -424,6 +424,17 @@ class TransactionQueue {
           dsTxHash,
           entry._pairIndex === 0 ? 'initial' : 'correction'
         );
+
+        // Send RATING_UPDATE to website so it can update transactionPairs in ClientTransactionLogs
+        try {
+          const updatedSeedObj = await entry._seedManager.getSeeds(entry._ratingRef);
+          if (updatedSeedObj && this.messagingClient) {
+            await this._sendRatingUpdate(entry._ratingRef, updatedSeedObj.transactionPairs);
+          }
+        } catch (updateErr) {
+          console.warn('[TransactionQueue] ⚠️ Failed to send RATING_UPDATE:', updateErr.message);
+          // Non-fatal — analytics will just show pending SH until next rating or page reload
+        }
       } catch (error) {
         console.error('[TransactionQueue] ❌ Phase 2: Spend failed, re-buffering for retry:', error.message, {
           destination: entry.destination,
@@ -512,6 +523,43 @@ class TransactionQueue {
     }
 
     return null;
+  }
+
+  /**
+   * Sends a RATING_UPDATE message to the website after a SH→DS spend completes.
+   * The website merges the updated transactionPairs into the stored ClientTransactionLog entry.
+   *
+   * @param {string} ratingRef - Rating reference (used as transaction_ref on server)
+   * @param {Array}  transactionPairs - Updated pairs from FingerprintSeedManager
+   * @private
+   */
+  async _sendRatingUpdate(ratingRef, transactionPairs) {
+    const storage = await browser.storage.local.get(['website_keys']);
+    const websitePublicKey = storage.website_keys?.encryption_key;
+    const websiteMessagingAddress = storage.website_keys?.messaging_address;
+
+    if (!websitePublicKey || !websiteMessagingAddress) {
+      console.warn('[TransactionQueue] ⚠️ _sendRatingUpdate: no website_keys, skipping');
+      return;
+    }
+
+    const payload = {
+      type: 'RATING_UPDATE',
+      ratingRef,
+      transactionPairs,
+      timestamp: Date.now()
+    };
+
+    // Seal with website public key (same pattern as RATING_FULL)
+    const encrypted = await window.SealedBox.encrypt(payload, websitePublicKey);
+    const message = {
+      type: 'RATING_UPDATE',
+      encryptedPayload: encrypted.ciphertext,
+      algorithm: encrypted.algorithm
+    };
+
+    await this.messagingClient.sendMessage(message, 'rating', [websiteMessagingAddress]);
+    console.log('[TransactionQueue] ✅ RATING_UPDATE sent for', ratingRef.substring(0, 16) + '...', '— pairs:', transactionPairs.length);
   }
 
   /**
