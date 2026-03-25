@@ -174,10 +174,17 @@
 
       messagingClient.onError = (error) => {
         console.error('[MessagingIntegration] ❌ onError triggered:', error.message);
-        // If the messaging service no longer recognizes us, the device was revoked server-side
-        // (e.g. account deleted). Treat this the same as an account_deleted message.
+        // NOT_REGISTERED means the server no longer knows this client.
+        // Only treat as account_deleted if the client had at least one successful poll —
+        // meaning it was previously registered and got revoked server-side.
+        // On the very first poll (successfulPollCount === 0) this just means the client
+        // hasn't been linked yet (race condition during registration flow).
         if (error.code === 'NOT_REGISTERED') {
-          handleAccountDeleted();
+          if (messagingClient.successfulPollCount > 0) {
+            handleAccountDeleted();
+          } else {
+            console.warn('[MessagingIntegration] ⚠️ NOT_REGISTERED on first poll — client not yet linked, ignoring');
+          }
         }
       };
 

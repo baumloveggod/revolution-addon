@@ -38,6 +38,7 @@ window.MessagingClient = function MessagingClient(options) {
 
   this.pollTimer = null;
   this.isPolling = false;
+  this.successfulPollCount = 0; // Track how many successful polls we've had
 
   // Event handlers
   this.onMessage = null;
@@ -446,6 +447,8 @@ window.MessagingClient.prototype.poll = async function() {
     }
 
     const data = await response.json();
+
+    this.successfulPollCount++;
 
     if (data.messages && data.messages.length > 0) {
       for (const message of data.messages) {
