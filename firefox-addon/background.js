@@ -2642,7 +2642,11 @@ persistState = async (newState) => {
   if (newState && newState.userToken) {
     await browser.storage.local.set({ rev_user_token: newState.userToken });
 
-    if (!window.MessagingIntegration.isMessagingInitialized()) {
+    // Only start messaging once device is fully linked — not during the linking flow itself.
+    // Starting messaging before DEVICE_REGISTRATION_RESPONSE means the client polls
+    // with keys the server doesn't know yet, causing NOT_REGISTERED on the first poll.
+    if (newState.deviceStatus === 'linked' && !window.MessagingIntegration.isMessagingInitialized()) {
+      window.MessagingIntegration?.setLinked?.();
       try {
         await window.MessagingIntegration.initMessaging(newState.userToken);
       } catch (error) {
