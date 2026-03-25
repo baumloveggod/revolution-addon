@@ -500,6 +500,10 @@ async function claimInvite(origin, inviteToken, userToken) {
               hasWallet: !!(message.data.wallet_address && message.data.wallet_key)
             }, 'success');
           }
+          // Device is now registered with messaging service — NOT_REGISTERED from here on = real revocation
+          if (message.data.messaging_registered) {
+            window.MessagingIntegration?.setLinked?.();
+          }
           resolve(message.data);
         } else {
           console.error('[claimInvite] ❌ Registration failed:', message.error);
@@ -1667,6 +1671,11 @@ async function initializeBackgroundScript() {
       const userToken = state?.userToken;
 
       if (userToken) {
+        // If device is already linked, mark as linked before messaging init
+        // so that NOT_REGISTERED errors are correctly treated as revocation
+        if (state?.deviceStatus === 'linked') {
+          window.MessagingIntegration?.setLinked?.();
+        }
         initializeMessaging()
           .catch(error => {
             console.error('[revolution-addon] ❌ Messaging init failed:', error.message);

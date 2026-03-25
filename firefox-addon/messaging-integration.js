@@ -20,6 +20,7 @@
   let isInitializing = false; // Track if initialization is in progress
   let registrationCheckInterval = null;
   let initializationPromise = null; // Track the initialization promise to avoid busy-wait
+  let isLinked = false; // True once device has been confirmed registered with messaging service
 
   /**
    * Start polling for messages
@@ -175,15 +176,15 @@
       messagingClient.onError = (error) => {
         console.error('[MessagingIntegration] ❌ onError triggered:', error.message);
         // NOT_REGISTERED means the server no longer knows this client.
-        // Only treat as account_deleted if the client had at least one successful poll —
-        // meaning it was previously registered and got revoked server-side.
-        // On the very first poll (successfulPollCount === 0) this just means the client
-        // hasn't been linked yet (race condition during registration flow).
+        // Only treat as account_deleted if we know this device was previously linked —
+        // meaning it was registered and got revoked server-side.
+        // If isLinked is false, the device is still in the registration flow and
+        // NOT_REGISTERED just means the server hasn't processed the registration yet.
         if (error.code === 'NOT_REGISTERED') {
-          if (messagingClient.successfulPollCount > 0) {
+          if (isLinked) {
             handleAccountDeleted();
           } else {
-            console.warn('[MessagingIntegration] ⚠️ NOT_REGISTERED on first poll — client not yet linked, ignoring');
+            console.warn('[MessagingIntegration] ⚠️ NOT_REGISTERED but device not yet linked — ignoring');
           }
         }
       };
@@ -914,6 +915,14 @@ window.MessagingIntegration.clearAllData = async function() {
    */
   window.MessagingIntegration.isMessagingInitialized = function() {
     return isInitialized && messagingClient !== null;
+  };
+
+  // Call this once the device has been confirmed registered with the messaging service
+  // (i.e. after DEVICE_REGISTRATION_RESPONSE with messaging_registered: true, or on
+  // addon startup when state.deviceStatus === 'linked').
+  // After this point, NOT_REGISTERED errors are treated as account deletion.
+  window.MessagingIntegration.setLinked = function() {
+    isLinked = true;
   };
 
 })();
