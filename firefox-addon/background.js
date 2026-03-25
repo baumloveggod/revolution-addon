@@ -1599,6 +1599,9 @@ async function initializeWalletSystem(clWalletAddress = null, privateKey = null,
       }
     }
 
+    // 10. Process ratings that were queued because wallet was not ready
+    await processPendingRatings();
+
   } catch (error) {
     console.error('[revolution-addon] ❌ Failed to initialize Wallet System:', error);
 
@@ -2197,6 +2200,59 @@ async function checkClientStatus() {
 //   checkClientStatus().catch(() => {});
 // }, 2000);
 
+const PENDING_RATINGS_KEY = 'rev_pending_ratings';
+const MAX_PENDING_RATINGS = 50; // Limit um Storage nicht zu überfluten
+
+async function enqueuePendingRating(sessionData, pageData, satisfactionData) {
+  try {
+    const stored = await browser.storage.local.get([PENDING_RATINGS_KEY]);
+    const queue = stored[PENDING_RATINGS_KEY] || [];
+    if (queue.length >= MAX_PENDING_RATINGS) {
+      // Ältestes Rating entfernen (FIFO)
+      queue.shift();
+    }
+    queue.push({ sessionData, pageData, satisfactionData, enqueuedAt: Date.now() });
+    await browser.storage.local.set({ [PENDING_RATINGS_KEY]: queue });
+    console.log(`[revolution-addon] ⏳ Rating queued for later (queue size: ${queue.length})`);
+  } catch (err) {
+    console.error('[revolution-addon] ❌ Failed to enqueue pending rating:', err);
+  }
+}
+
+async function processPendingRatings() {
+  try {
+    const stored = await browser.storage.local.get([PENDING_RATINGS_KEY]);
+    const queue = stored[PENDING_RATINGS_KEY] || [];
+    if (queue.length === 0) return;
+
+    const revolution = window.getRevolutionScoring && window.getRevolutionScoring();
+    if (!revolution || !revolution.initialized) return;
+
+    console.log(`[revolution-addon] 🔄 Processing ${queue.length} pending rating(s)...`);
+    await browser.storage.local.remove(PENDING_RATINGS_KEY);
+
+    for (const pending of queue) {
+      try {
+        const result = await revolution.processSession(
+          pending.sessionData,
+          pending.pageData,
+          pending.satisfactionData
+        );
+        if (result && result.walletNotReady) {
+          // Wallet immer noch nicht bereit — wieder einreihen
+          await enqueuePendingRating(pending.sessionData, pending.pageData, pending.satisfactionData);
+        } else if (result !== null) {
+          console.log(`[revolution-addon] ✅ Pending rating processed: ${pending.sessionData.sessionId}`);
+        }
+      } catch (err) {
+        console.error('[revolution-addon] ❌ Failed to process pending rating:', err);
+      }
+    }
+  } catch (err) {
+    console.error('[revolution-addon] ❌ Failed to process pending ratings queue:', err);
+  }
+}
+
 /**
  * Handler für abgeschlossene Tracking-Sessions
  */
@@ -2275,10 +2331,14 @@ async function handleSessionCompleted(sessionSummary) {
     // Verarbeite Session durch RevolutionScoring
     const result = await revolution.processSession(sessionData, pageData, satisfactionData);
 
-    // Rating wurde verworfen (kein BA→CL Transfer)
+    // Wallet noch nicht bereit → Rating in Queue speichern für spätere Verarbeitung
+    if (result && result.walletNotReady) {
+      await enqueuePendingRating(sessionData, pageData, satisfactionData);
+      return;
+    }
+
+    // Rating wurde verworfen (kein BA→CL Transfer oder Score 0)
     if (result === null) {
-      console.warn('[revolution-addon] ⚠️ Rating was discarded - no BA→CL transfer found');
-      console.warn('[revolution-addon] User must wait for first budget allocation interval');
       return;
     }
 

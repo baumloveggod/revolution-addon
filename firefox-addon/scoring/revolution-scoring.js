@@ -137,9 +137,9 @@ class RevolutionScoring {
           console.error('[RevolutionScoring] ⏸️ Rating paused - Central Ledger not reachable:', transferCheck.error);
           throw new Error(`Rating paused: ${transferCheck.error}`);
         } else if (transferCheck.error && transferCheck.error.includes('not initialized')) {
-          // Wallet noch nicht bereit (ADDRESS_UPDATE ausstehend) → Rating überspringen, nicht verwerfen
-          console.warn('[RevolutionScoring] ⏳ Wallet not ready yet, skipping rating entirely');
-          return null;
+          // Wallet noch nicht bereit (ADDRESS_UPDATE ausstehend) → Rating in Queue halten, nicht verwerfen
+          console.warn('[RevolutionScoring] ⏳ Wallet not ready yet, queuing rating for later');
+          return { walletNotReady: true };
         } else {
           // Kein BA→CL Transfer gefunden → Rating verwerfen
           console.warn('[RevolutionScoring] ❌ Rating discarded - No BA→CL transfer found yet');
@@ -148,8 +148,12 @@ class RevolutionScoring {
         }
       }
 
+    } else if (!walletManager) {
+      // WalletManager noch nicht initialisiert → Rating in Queue halten
+      console.warn('[RevolutionScoring] ⏳ WalletManager not ready yet, queuing rating for later');
+      return { walletNotReady: true };
     } else {
-      console.warn('[RevolutionScoring] ⚠️ Cannot check BA→CL transfer - WalletManager or TranslationFactorTracker not available');
+      console.warn('[RevolutionScoring] ⚠️ Cannot check BA→CL transfer - TranslationFactorTracker not available');
     }
 
     // 4. Generiere IMMER ratingRef und Fingerprint-Seeds (auch wenn Transaktionen vorhanden sind)
