@@ -12,6 +12,6 @@
   },
   "dependencies": {
     "libsodium-wrappers": "^0.7.16",
-    "revolution-wallet": "github:baumloveggod/revolution-wallet#v0.1.0"
+    "revolution-wallet": "github:baumloveggod/revolution-wallet#ab3a15c2c355a262070d5cc2ee32e7b8ecb30c15"
   }
 }

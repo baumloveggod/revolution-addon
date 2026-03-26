@@ -20,8 +20,8 @@
    * WICHTIG: Wallets werden NICHT vom Addon generiert!
    *
    * @param {Object} config
-   * @param {string} [config.clApiUrl='https://ledger.lenkenhoff.de'] - Write-server URL
-   * @param {string} [config.clReadApiUrl='https://read.lenkenhoff.de'] - Read-server URL
+   * @param {string} [config.clApiUrl='https://192.168.178.130:4100'] - Write-server URL
+   * @param {string} [config.clReadApiUrl='https://192.168.178.130:4101'] - Read-server URL
    * @param {Object} config.storage - Storage backend implementing browser.storage.local interface
    * @param {Function} [config.fetch] - Fetch function (defaults to globalThis.fetch).
    *                                    Pass window.fetchWithVersion in the Firefox addon.
@@ -30,9 +30,9 @@
   class WalletManager {
     constructor(config = {}) {
       // Write-server (mutations): port 4100
-      this.clApiUrl = config.clApiUrl || 'https://ledger.lenkenhoff.de';
+      this.clApiUrl = config.clApiUrl || 'https://192.168.178.130:4100';
       // Read-server (balance, transactions, health): port 4101
-      this.clReadApiUrl = config.clReadApiUrl || 'https://read.lenkenhoff.de';
+      this.clReadApiUrl = config.clReadApiUrl || 'https://192.168.178.130:4101';
 
       if (!config.storage) {
         throw new Error('[WalletManager] storage is required in config');
@@ -386,10 +386,10 @@
   class AnonTransactionClient {
     constructor(config = {}) {
       // Write-server (POST /anon/mint)
-      this.anonApiUrl   = config.anonApiUrl   || 'https://ledger.lenkenhoff.de/anon';
-      this.clApiUrl     = config.clApiUrl     || 'https://ledger.lenkenhoff.de';
+      this.anonApiUrl   = config.anonApiUrl   || 'https://192.168.178.130:4100/anon';
+      this.clApiUrl     = config.clApiUrl     || 'https://192.168.178.130:4100';
       // Read-server (GET /anon/blocks/*, GET /wallets/*/registration)
-      this.clReadApiUrl = config.clReadApiUrl || 'https://read.lenkenhoff.de';
+      this.clReadApiUrl = config.clReadApiUrl || 'https://192.168.178.130:4101';
       this.fetch        = config.fetch || globalThis.fetch.bind(globalThis);
       this.sodium       = config.sodium || null;
     }
