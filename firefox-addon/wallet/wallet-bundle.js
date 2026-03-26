@@ -399,10 +399,11 @@
      *
      * @param {Object} clWallet - CL Wallet {address, publicKey, privateKey}
      * @param {bigint} amount - Token amount
-     * @param {string} fingerprint - Optional fingerprint for transaction tracking
+     * @param {string} fingerprint - Required fingerprint linking this mint to a rating
      * @returns {Promise<Object>} {serial, signature, amount}
      */
-    async mintAnonNote(clWallet, amount, fingerprint = null) {
+    async mintAnonNote(clWallet, amount, fingerprint) {
+      if (!fingerprint) throw new Error('fingerprint_required: mintAnonNote requires a fingerprintCLtoSH');
       try {
         console.log('[AnonTxClient] Minting anonymous note:', {
           amount: amount.toString(),
@@ -464,11 +465,12 @@
      * @param {string} signature - Unblinded signature (hex string)
      * @param {bigint} amount - Token amount
      * @param {string} destinationAddress - DS wallet address
-     * @param {string} fingerprint - Optional fingerprint for transaction tracking
+     * @param {string} fingerprint - Required fingerprint linking this spend to a rating
      * @param {string} blockId - Block ID from mint (optional for backwards compatibility)
      * @returns {Promise<Object>} {txHash}
      */
-    async spendAnonNote(serial, signature, amount, destinationAddress, fingerprint = null, blockId = null) {
+    async spendAnonNote(serial, signature, amount, destinationAddress, fingerprint, blockId = null) {
+      if (!fingerprint) throw new Error('fingerprint_required: spendAnonNote requires a fingerprintSHtoDS');
       try {
         console.log('[AnonTxClient] 📍 spendAnonNote: Starting SH → DS spend...', {
           serial: serial.substring(0, 16) + '...',
@@ -494,16 +496,13 @@
           serial: serial,
           signature: signature,
           amount: amount.toString(),
-          to: destinationAddress
+          to: destinationAddress,
+          fingerprint
         };
 
         // NOTE: blockId is intentionally NOT sent — sending it would link mint to spend
         // and break anonymity. The server resolves the sealed block by amount itself.
         // blockId is only used locally above for waitForBlockSeal() polling.
-
-        if (fingerprint) {
-          payload.fingerprint = fingerprint;
-        }
 
         const response = await this.fetch(`${this.anonApiUrl}/spend`, {
           method: 'POST',
@@ -885,11 +884,9 @@
         from: fromAddress,
         amount: amount.toString(),
         blindedNote: blindedMessage.toString(16),  // BigInt → hex string
-        timestamp: timestamp
+        timestamp: timestamp,
+        fingerprint
       };
-      if (fingerprint) {
-        payload.fingerprint = fingerprint;
-      }
 
       // POST /anon/mint
       console.log('[AnonTxClient] 📍 transferCLtoSH: Calling POST /anon/mint...', {
