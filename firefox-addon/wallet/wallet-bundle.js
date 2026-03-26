@@ -847,10 +847,10 @@
      * @param {Object} clWallet - CL Wallet
      * @param {bigint} amount - Amount
      * @param {bigint} blindedMessage - Blinded message
-     * @param {string} fingerprint - Optional fingerprint for transaction tracking
+     * @param {string} fingerprint - Required fingerprint for transaction tracking
      * @returns {Promise<bigint>} Blind signature
      */
-    async transferCLtoSH(clWallet, amount, blindedMessage, fingerprint = null) {
+    async transferCLtoSH(clWallet, amount, blindedMessage, fingerprint) {
       console.log('[AnonTxClient] 📍 transferCLtoSH: Starting CL → SH transfer...', {
         clWalletAddress: clWallet.address,
         amount: amount.toString(),
