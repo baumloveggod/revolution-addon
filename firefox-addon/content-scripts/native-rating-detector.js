@@ -95,11 +95,13 @@ class NativeRatingDetector {
     this.rating = null;
     this.hasNativeRating = false;
     this.observers = [];
+    this._attachedButtons = new WeakSet(); // track buttons with listeners
+    this._mutationDebounceTimer = null;    // debounce MutationObserver
+    this._buttonsFound = false;            // stop re-setup once buttons are found
 
     if (this.pattern) {
       this.initialize();
     }
-
   }
 
   getDomain() {
@@ -130,128 +132,130 @@ class NativeRatingDetector {
   }
 
   setupDetection() {
+    if (this._buttonsFound) return; // already attached, nothing to do
+
+    let found = false;
+
     // Setup based on pattern type
     switch (this.pattern.type) {
       case 'like-dislike':
-        this.setupLikeDislike();
+        found = this.setupLikeDislike();
         break;
       case 'upvote-downvote':
-        this.setupUpvoteDownvote();
+        found = this.setupUpvoteDownvote();
         break;
       case 'star':
-        this.setupStar();
+        found = this.setupStar();
         break;
       case 'clap':
-        this.setupClap();
+        found = this.setupClap();
         break;
       case 'vote':
-        this.setupVote();
+        found = this.setupVote();
         break;
     }
 
-    // Setup MutationObserver for dynamic content
-    this.setupMutationObserver();
+    if (found) {
+      this._buttonsFound = true;
+    }
+
+    // Setup MutationObserver only once
+    if (!this.observers.length) {
+      this.setupMutationObserver();
+    }
   }
 
   setupLikeDislike() {
-    const checkButtons = () => {
-      const likeBtn = document.querySelector(this.pattern.like.selector);
-      const dislikeBtn = document.querySelector(this.pattern.dislike.selector);
+    const likeBtn = document.querySelector(this.pattern.like.selector);
+    const dislikeBtn = document.querySelector(this.pattern.dislike.selector);
 
-      if (likeBtn && dislikeBtn) {
-        // Check current state
-        const likePressed = likeBtn.getAttribute(this.pattern.like.clickedAttr) === this.pattern.like.clickedValue;
-        const dislikePressed = dislikeBtn.getAttribute(this.pattern.dislike.clickedAttr) === this.pattern.dislike.clickedValue;
+    if (likeBtn && dislikeBtn) {
+      const likePressed = likeBtn.getAttribute(this.pattern.like.clickedAttr) === this.pattern.like.clickedValue;
+      const dislikePressed = dislikeBtn.getAttribute(this.pattern.dislike.clickedAttr) === this.pattern.dislike.clickedValue;
 
-        if (likePressed) {
-          this.setRating(5); // Like = 5 stars
-        } else if (dislikePressed) {
-          this.setRating(1); // Dislike = 1 star
-        }
+      if (likePressed) {
+        this.setRating(5);
+      } else if (dislikePressed) {
+        this.setRating(1);
+      }
 
-        // Add click listeners
+      if (!this._attachedButtons.has(likeBtn)) {
+        this._attachedButtons.add(likeBtn);
         likeBtn.addEventListener('click', () => {
           setTimeout(() => {
             const nowPressed = likeBtn.getAttribute(this.pattern.like.clickedAttr) === this.pattern.like.clickedValue;
             this.setRating(nowPressed ? 5 : null);
           }, 100);
         });
+      }
 
+      if (!this._attachedButtons.has(dislikeBtn)) {
+        this._attachedButtons.add(dislikeBtn);
         dislikeBtn.addEventListener('click', () => {
           setTimeout(() => {
             const nowPressed = dislikeBtn.getAttribute(this.pattern.dislike.clickedAttr) === this.pattern.dislike.clickedValue;
             this.setRating(nowPressed ? 1 : null);
           }, 100);
         });
-
-        return true;
       }
-      return false;
-    };
 
-    // Try immediately and retry with delay
-    if (!checkButtons()) {
-      setTimeout(checkButtons, 1000);
-      setTimeout(checkButtons, 3000);
+      return true;
     }
+    return false;
   }
 
   setupUpvoteDownvote() {
-    const checkButtons = () => {
-      const upvoteBtn = document.querySelector(this.pattern.upvote.selector);
-      const downvoteBtn = document.querySelector(this.pattern.downvote.selector);
+    const upvoteBtn = document.querySelector(this.pattern.upvote.selector);
+    const downvoteBtn = document.querySelector(this.pattern.downvote.selector);
 
-      if (upvoteBtn && downvoteBtn) {
-        // Check current state
-        const upvoted = upvoteBtn.classList.contains(this.pattern.upvote.clickedClass);
-        const downvoted = downvoteBtn.classList.contains(this.pattern.downvote.clickedClass);
+    if (upvoteBtn && downvoteBtn) {
+      const upvoted = upvoteBtn.classList.contains(this.pattern.upvote.clickedClass);
+      const downvoted = downvoteBtn.classList.contains(this.pattern.downvote.clickedClass);
 
-        if (upvoted) {
-          this.setRating(5); // Upvote = 5 stars
-        } else if (downvoted) {
-          this.setRating(1); // Downvote = 1 star
-        }
+      if (upvoted) {
+        this.setRating(5);
+      } else if (downvoted) {
+        this.setRating(1);
+      }
 
-        // Add click listeners
+      if (!this._attachedButtons.has(upvoteBtn)) {
+        this._attachedButtons.add(upvoteBtn);
         upvoteBtn.addEventListener('click', () => {
           setTimeout(() => {
             const nowUpvoted = upvoteBtn.classList.contains(this.pattern.upvote.clickedClass);
             this.setRating(nowUpvoted ? 5 : null);
           }, 100);
         });
+      }
 
+      if (!this._attachedButtons.has(downvoteBtn)) {
+        this._attachedButtons.add(downvoteBtn);
         downvoteBtn.addEventListener('click', () => {
           setTimeout(() => {
             const nowDownvoted = downvoteBtn.classList.contains(this.pattern.downvote.clickedClass);
             this.setRating(nowDownvoted ? 1 : null);
           }, 100);
         });
-
-        return true;
       }
-      return false;
-    };
 
-    if (!checkButtons()) {
-      setTimeout(checkButtons, 1000);
-      setTimeout(checkButtons, 3000);
+      return true;
     }
+    return false;
   }
 
   setupStar() {
-    const checkButton = () => {
-      const starBtn = document.querySelector(this.pattern.star.selector);
+    const starBtn = document.querySelector(this.pattern.star.selector);
 
-      if (starBtn) {
-        // Check if already starred
-        const isStarred = starBtn.getAttribute(this.pattern.star.clickedAttr)?.includes(this.pattern.star.clickedValue) ||
-                         starBtn.textContent?.includes(this.pattern.star.clickedText);
+    if (starBtn) {
+      const isStarred = starBtn.getAttribute(this.pattern.star.clickedAttr)?.includes(this.pattern.star.clickedValue) ||
+                       starBtn.textContent?.includes(this.pattern.star.clickedText);
 
-        if (isStarred) {
-          this.setRating(5); // Star = 5 stars
-        }
+      if (isStarred) {
+        this.setRating(5);
+      }
 
-        // Add click listener
+      if (!this._attachedButtons.has(starBtn)) {
+        this._attachedButtons.add(starBtn);
         starBtn.addEventListener('click', () => {
           setTimeout(() => {
             const nowStarred = starBtn.getAttribute(this.pattern.star.clickedAttr)?.includes(this.pattern.star.clickedValue) ||
@@ -259,60 +263,55 @@ class NativeRatingDetector {
             this.setRating(nowStarred ? 5 : null);
           }, 100);
         });
-
-        return true;
       }
-      return false;
-    };
 
-    if (!checkButton()) {
-      setTimeout(checkButton, 1000);
-      setTimeout(checkButton, 3000);
+      return true;
     }
+    return false;
   }
 
   setupClap() {
-    const checkButton = () => {
-      const clapBtn = document.querySelector(this.pattern.clap.selector);
+    const clapBtn = document.querySelector(this.pattern.clap.selector);
 
-      if (clapBtn) {
-        // Add click listener
+    if (clapBtn) {
+      if (!this._attachedButtons.has(clapBtn)) {
+        this._attachedButtons.add(clapBtn);
         clapBtn.addEventListener('click', () => {
           setTimeout(() => {
             const countElem = document.querySelector(this.pattern.clap.countSelector);
             const count = countElem ? parseInt(countElem.textContent) || 0 : 0;
             if (count > 0) {
-              this.setRating(5); // Clapped = 5 stars
+              this.setRating(5);
             }
           }, 100);
         });
-
-        return true;
       }
-      return false;
-    };
 
-    if (!checkButton()) {
-      setTimeout(checkButton, 1000);
-      setTimeout(checkButton, 3000);
+      return true;
     }
+    return false;
   }
 
   setupVote() {
-    // Similar to upvote-downvote
-    this.setupUpvoteDownvote();
+    return this.setupUpvoteDownvote();
   }
 
   setupMutationObserver() {
-    // Observe DOM changes for dynamic content
     const observer = new MutationObserver((mutations) => {
-      // Re-run detection if new nodes added
-      for (const mutation of mutations) {
-        if (mutation.addedNodes.length > 0) {
-          this.setupDetection();
-          break;
-        }
+      if (this._buttonsFound) {
+        // Buttons already attached — stop observing, we no longer need this
+        observer.disconnect();
+        return;
       }
+
+      const hasNewNodes = mutations.some(m => m.addedNodes.length > 0);
+      if (!hasNewNodes) return;
+
+      // Debounce: wait for DOM to settle before re-running detection
+      clearTimeout(this._mutationDebounceTimer);
+      this._mutationDebounceTimer = setTimeout(() => {
+        this.setupDetection();
+      }, 300);
     });
 
     observer.observe(document.body, {
@@ -353,6 +352,7 @@ class NativeRatingDetector {
   }
 
   cleanup() {
+    clearTimeout(this._mutationDebounceTimer);
     this.observers.forEach(observer => observer.disconnect());
     this.observers = [];
   }
@@ -374,6 +374,13 @@ if (document.readyState === 'loading') {
 } else {
   initNativeRatingDetector();
 }
+
+// Cleanup on unload to prevent lingering observers
+window.addEventListener('pagehide', () => {
+  if (nativeRatingDetector) {
+    nativeRatingDetector.cleanup();
+  }
+});
 
 // Export
 if (typeof window !== 'undefined') {
