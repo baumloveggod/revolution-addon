@@ -40,6 +40,30 @@ let linkingUserId = null;  // Track which user the linkingPromise is for
 let linkingInProgress = false;  // Synchronous flag to prevent race conditions
 let lastProcessedToken = null;
 
+// ── Human-in-the-Loop: User must confirm before first linking ─────────────
+// Resolve/reject are set when state enters 'awaiting_approval'.
+// APPROVE_LINKING message resolves, DENY_LINKING rejects.
+let _approvalResolve = null;
+let _approvalReject = null;
+
+function waitForApproval() {
+  return new Promise((resolve, reject) => {
+    _approvalResolve = resolve;
+    _approvalReject = reject;
+  });
+}
+
+function resolveApproval(approved) {
+  if (approved && _approvalResolve) {
+    _approvalResolve();
+  } else if (!approved && _approvalReject) {
+    _approvalReject(new Error('user_denied'));
+  }
+  _approvalResolve = null;
+  _approvalReject = null;
+}
+// ─────────────────────────────────────────────────────────────────────────
+
 function createState(overrides = {}) {
   return {
     userToken: null,
@@ -824,6 +848,47 @@ async function ensureClientContext(state, persistFn = async () => {}) {
     return linkingStateForWait;
   }
 
+  // ── Human-in-the-Loop: ask user before first-time linking ────────────────
+  // If the state has never been approved for this user, pause and wait.
+  const alreadyApproved = state.linkingApproved === true;
+  if (!alreadyApproved) {
+    // Don't ask twice: if we're already waiting, just return the current state.
+    if (state.deviceStatus === 'awaiting_approval') {
+      return state;
+    }
+    const approvalState = {
+      ...state,
+      deviceStatus: 'awaiting_approval',
+      deviceError: null,
+    };
+    await persistFn(approvalState);
+
+    // Show a browser notification so the user knows to open the popup
+    notifyUser(
+      'Revolution: Gerät verbinden?',
+      'Öffne das Add-on-Popup um das Verbinden zu genehmigen oder abzulehnen.'
+    );
+
+    try {
+      await waitForApproval();
+    } catch (_) {
+      // User denied
+      const deniedState = {
+        ...approvalState,
+        deviceStatus: 'idle',
+        deviceError: null,
+        linkingApproved: false,
+      };
+      await persistFn(deniedState);
+      return deniedState;
+    }
+
+    // Approved — mark so we don't ask again for this user
+    state = { ...state, linkingApproved: true, deviceStatus: 'idle' };
+    await persistFn(state);
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   // Set synchronous flag IMMEDIATELY to prevent concurrent linking attempts
   linkingInProgress = true;
 
@@ -910,16 +975,9 @@ async function handlePageTokenMessage(message, sender) {
   }
   const token = message && message.token;
   if (!token) {
-    // Clear state when website logs out
-    const existingState = await loadState();
-    if (existingState && existingState.userToken) {
-      const clearedState = createState({
-        origin: existingState.origin
-      });
-      await persistState(clearedState);
-      return { ok: true, status: 'logged_out_state_cleared' };
-    }
-    return { ok: true, status: 'no_token_no_state' };
+    // Website logged out — do NOT log out the addon.
+    // The addon maintains its own independent session (rev_client_token).
+    return { ok: true, status: 'website_logout_ignored' };
   }
 
   // CRITICAL: Prevent concurrent linking attempts
@@ -1938,6 +1996,14 @@ browser.runtime.onMessage.addListener((message, sender) => {
   }
   if (message.type === 'POPUP_STATUS') {
     return provideStatus();
+  }
+  if (message.type === 'APPROVE_LINKING') {
+    resolveApproval(true);
+    return Promise.resolve({ ok: true });
+  }
+  if (message.type === 'DENY_LINKING') {
+    resolveApproval(false);
+    return Promise.resolve({ ok: true });
   }
   if (message.type === 'REQUEST_SITE_LOGIN') {
     return openSite(LOGIN_PATH, message.origin)

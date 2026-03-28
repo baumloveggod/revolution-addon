@@ -244,6 +244,9 @@ async function refreshStatus() {
       clientStatus,
       hasPending
     });
+
+    // Hide approval panel by default; shown only in awaiting_approval branch
+    document.getElementById('approvalSection').hidden = true;
     if (isLinked) {
       const originHost = response.origin ? new URL(response.origin).host : 'Revolution';
       statusTextEl.textContent = `Eingeloggt bei ${originHost}`;
@@ -331,6 +334,20 @@ async function refreshStatus() {
 
       setLoginButtonMode('login');
       logoutButton.hidden = true;
+    } else if (clientStatus === 'awaiting_approval') {
+      statusTextEl.textContent = 'Bestätigung erforderlich';
+      statusMetaEl.textContent = 'Das Add-on möchte sich mit deinem Konto verbinden.';
+      setLoginButtonMode('switch');
+      logoutButton.hidden = true;
+      // Show approval panel
+      const approvalSection = document.getElementById('approvalSection');
+      approvalSection.hidden = false;
+      const profileHint = document.getElementById('approvalProfileHint');
+      if (response && response.profile) {
+        profileHint.textContent = `Konto: ${describeProfile(response.profile)}`;
+      } else {
+        profileHint.textContent = '';
+      }
     } else if (clientStatus === 'linking' || (loggedIn && !isLinked)) {
       // Beide Zustände zeigen die gleiche Nachricht
       statusTextEl.textContent = 'Verknüpfe Add-on…';
@@ -592,6 +609,38 @@ logoutButton.addEventListener('click', async () => {
 
 // Simulate tab close button
 simulateCloseButton.addEventListener('click', simulateTabClose);
+
+// ── Human-in-the-Loop: Approve / Deny ────────────────────────────────────
+document.getElementById('approveButton').addEventListener('click', async () => {
+  const btn = document.getElementById('approveButton');
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    await browser.runtime.sendMessage({ type: 'APPROVE_LINKING' });
+    document.getElementById('approvalSection').hidden = true;
+    setTimeout(refreshStatus, 500);
+  } catch (err) {
+    addDebugLog('Fehler beim Genehmigen', { error: err.message });
+    btn.disabled = false;
+    btn.textContent = '✓ Verbinden erlauben';
+  }
+});
+
+document.getElementById('denyButton').addEventListener('click', async () => {
+  const btn = document.getElementById('denyButton');
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    await browser.runtime.sendMessage({ type: 'DENY_LINKING' });
+    document.getElementById('approvalSection').hidden = true;
+    setTimeout(refreshStatus, 500);
+  } catch (err) {
+    addDebugLog('Fehler beim Ablehnen', { error: err.message });
+    btn.disabled = false;
+    btn.textContent = '✗ Ablehnen';
+  }
+});
+// ─────────────────────────────────────────────────────────────────────────
 
 addDebugLog('Popup geladen, fordere Token an');
 browser.runtime.sendMessage({ type: 'REQUEST_ACTIVE_TOKEN' }).catch((err) => {

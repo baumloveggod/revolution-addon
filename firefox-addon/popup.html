@@ -18,6 +18,19 @@
       <button id="loginButton">Über Webseite einloggen</button>
       <button id="logoutButton" hidden class="danger">Abmelden</button>
 
+      <!-- Human-in-the-Loop: Verbindungsanfrage bestätigen -->
+      <section id="approvalSection" hidden style="margin-top: 16px; padding: 14px; background: #fff8e1; border-radius: 6px; border: 2px solid #f59e0b;">
+        <h2 style="margin: 0 0 8px 0; font-size: 14px; color: #92400e;">🔗 Gerät verbinden?</h2>
+        <p style="margin: 0 0 12px 0; font-size: 13px; color: #78350f;">
+          Das Add-on möchte sich mit deinem Revolution-Konto verknüpfen.<br>
+          <span id="approvalProfileHint" style="font-weight: 600;"></span>
+        </p>
+        <div style="display: flex; gap: 8px;">
+          <button id="approveButton" style="flex: 1; padding: 8px; background: #16a34a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600;">✓ Verbinden erlauben</button>
+          <button id="denyButton" style="flex: 1; padding: 8px; background: #dc2626; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">✗ Ablehnen</button>
+        </div>
+      </section>
+
       <section id="messagingSection" hidden style="margin-top: 16px; padding: 12px; background: #f0f8ff; border-radius: 6px; border: 1px solid #b8d4e8;">
         <h2 style="margin: 0 0 8px 0; font-size: 14px; color: #333;">📨 Messaging</h2>
         <button id="simulateCloseButton" class="test-button" style="width: 100%; padding: 6px 12px; font-size: 13px; margin-top: 4px;">
