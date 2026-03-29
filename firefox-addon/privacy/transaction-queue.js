@@ -475,20 +475,20 @@ class TransactionQueue {
     }
 
     const groupKeys = this.messagingClient.groupKeys;
-    const selfFingerprint = this.messagingClient.fingerprint;
+    const selfAddress = this.messagingClient.messagingAddress;
 
     // ROLE-BASED: Suche nach Key mit role="admin" (Website)
-    for (const [fingerprint, keyData] of Object.entries(groupKeys)) {
-      if (fingerprint !== selfFingerprint && keyData.role === 'admin') {
+    for (const [address, keyData] of Object.entries(groupKeys)) {
+      if (address !== selfAddress && keyData.role === 'admin') {
         return keyData.publicKey;
       }
     }
 
     // Fallback: Erstes Gruppenmitglied außer Self (für Backward Compatibility)
-    const fingerprints = Object.keys(groupKeys).filter(fp => fp !== selfFingerprint);
-    if (fingerprints.length > 0) {
-      const fallbackKey = groupKeys[fingerprints[0]];
-      console.warn('[TransactionQueue] ⚠️ No admin key found, using fallback:', fingerprints[0].substring(0, 16) + '...');
+    const addresses = Object.keys(groupKeys).filter(addr => addr !== selfAddress);
+    if (addresses.length > 0) {
+      const fallbackKey = groupKeys[addresses[0]];
+      console.warn('[TransactionQueue] ⚠️ No admin key found, using fallback:', addresses[0].substring(0, 16) + '...');
       return fallbackKey?.publicKey || null;
     }
 
@@ -496,8 +496,8 @@ class TransactionQueue {
   }
 
   /**
-   * Get website fingerprint from group keys
-   * @returns {string|null} Website fingerprint or null if not found
+   * Get website messaging address from group keys
+   * @returns {string|null} Website messaging address or null if not found
    * @private
    */
   async _getWebsiteFingerprint() {
@@ -506,20 +506,20 @@ class TransactionQueue {
     }
 
     const groupKeys = this.messagingClient.groupKeys;
-    const selfFingerprint = this.messagingClient.fingerprint;
+    const selfAddress = this.messagingClient.messagingAddress;
 
     // ROLE-BASED: Suche nach Key mit role="admin" (Website)
-    for (const [fingerprint, keyData] of Object.entries(groupKeys)) {
-      if (fingerprint !== selfFingerprint && keyData.role === 'admin') {
-        return fingerprint;
+    for (const [address, keyData] of Object.entries(groupKeys)) {
+      if (address !== selfAddress && keyData.role === 'admin') {
+        return address;
       }
     }
 
     // Fallback: Erstes Gruppenmitglied außer Self (für Backward Compatibility)
-    const fingerprints = Object.keys(groupKeys).filter(fp => fp !== selfFingerprint);
-    if (fingerprints.length > 0) {
-      console.warn('[TransactionQueue] ⚠️ No admin fingerprint found, using fallback:', fingerprints[0].substring(0, 16) + '...');
-      return fingerprints[0];
+    const addresses = Object.keys(groupKeys).filter(addr => addr !== selfAddress);
+    if (addresses.length > 0) {
+      console.warn('[TransactionQueue] ⚠️ No admin address found, using fallback:', addresses[0].substring(0, 16) + '...');
+      return addresses[0];
     }
 
     return null;
@@ -589,7 +589,7 @@ class TransactionQueue {
       type: 'rating',
       timestamp: Date.now(),
       nonce: await window.MessagingCrypto.generateNonce(),
-      sender: this.messagingClient.fingerprint,
+      sender: this.messagingClient.messagingAddress,
       recipients: [websiteFingerprint],
       payload: {
         [websiteFingerprint]: encryptedForWebsite
@@ -631,11 +631,11 @@ class TransactionQueue {
   async _sendToOtherDevices(message) {
     const websiteFingerprint = await this._getWebsiteFingerprint();
     const groupKeys = this.messagingClient.groupKeys;
-    const selfFingerprint = this.messagingClient.fingerprint;
+    const selfAddress = this.messagingClient.messagingAddress;
 
     // Get all recipients EXCEPT self and website
     const recipients = Object.keys(groupKeys).filter(
-      fp => fp !== selfFingerprint && fp !== websiteFingerprint
+      fp => fp !== selfAddress && fp !== websiteFingerprint
     );
 
     if (recipients.length === 0) {
@@ -663,7 +663,7 @@ class TransactionQueue {
       type: 'rating_summary',  // Fixed: was 'rating', should be 'rating_summary' for handler
       timestamp: Date.now(),
       nonce: await window.MessagingCrypto.generateNonce(),
-      sender: selfFingerprint,
+      sender: selfAddress,
       recipients: recipients,
       payload: encryptedPayloads
     };
