@@ -58,22 +58,33 @@
 
   /**
    * Get messaging service URL from server config
-   *
-   * #FIXME: localhost handling
-   * Currently treating localhost the same as any public domain, but localhost is not globally unique.
-   * Public domains are globally unique, but localhost can refer to different machines in different contexts.
-   * This could cause issues in multi-environment setups or when the addon communicates with different
-   * local server instances. Need to implement proper environment detection or configuration mechanism.
    */
   async function getMessagingServiceUrl(origin) {
+    const isLocalDev = window.RevolutionConfig &&
+      window.RevolutionConfig.DEBUG_MODE &&
+      window.RevolutionConfig.isLocalhostOrigin(origin);
+
     try {
       const response = await fetch(`${origin}/auth/config`);
       if (response.ok) {
         const config = await response.json();
-        return config.messagingServiceUrl || 'https://msg.lenkenhoff.de';
+        if (config.messagingServiceUrl) {
+          return config.messagingServiceUrl;
+        }
       }
     } catch (error) {
-      console.warn('[MessagingIntegration] ⚠️ Failed to get config, using default', error.message);
+      if (isLocalDev) {
+        console.warn('[MessagingIntegration] ⚠️ Local dev server not reachable at', origin);
+      } else {
+        console.warn('[MessagingIntegration] ⚠️ Failed to get config, using default', error.message);
+      }
+    }
+
+    // Fallback: for localhost dev, derive messaging URL from same host;
+    // for production, use hardcoded default
+    if (isLocalDev) {
+      const url = new URL(origin);
+      return `http://${url.hostname}:3001`;
     }
     return 'https://msg.lenkenhoff.de';
   }
@@ -81,7 +92,12 @@
   /**
    * Initialize messaging (generates keypairs even without token)
    */
-  window.MessagingIntegration.initMessaging = async function(userToken, origin = 'https://api.lenkenhoff.de') {
+  window.MessagingIntegration.initMessaging = async function(
+    userToken,
+    origin = (window.RevolutionConfig && window.RevolutionConfig.DEBUG_MODE)
+      ? 'http://localhost:3000'
+      : 'https://api.lenkenhoff.de'
+  ) {
     // Skip if initialization is in progress - return existing promise instead of busy-wait
     if (isInitializing && initializationPromise) {
       return await initializationPromise;
@@ -109,6 +125,16 @@
 
             // Clear website public key (user-specific!)
             localStorage.removeItem('rev_messaging_public_key');
+
+            // Clear keypairs so new user gets fresh keys (prevents device_fingerprint_conflict)
+            await browser.storage.local.remove([
+              'rev_messaging_keypair',
+              'rev_messaging_signing_keypair',
+              'rev_messaging_address'
+            ]);
+            messagingClient.keyPair = null;
+            messagingClient.signingKeyPair = null;
+            messagingClient.messagingAddress = null;
 
             // Stop polling old group
             messagingClient.stopPolling();

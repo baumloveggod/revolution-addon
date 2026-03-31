@@ -101,18 +101,22 @@ class RevolutionScoring {
         // When extracted to the core module, replace with StorageAdapter.get().
         const stored = await browser.storage.local.get('domain_preferences');
         const prefs = stored['domain_preferences'] || {};
+        scoringResult.breakdown = scoringResult.breakdown || {};
         if (prefs[domain]) {
           const factor = prefs[domain].adjustmentFactor;
           const adjusted = Math.max(0, Math.min(this.scoringEngine.config.scores.MAX_SCORE,
             Math.floor(scoringResult.score * factor)));
-          scoringResult.breakdown = scoringResult.breakdown || {};
           scoringResult.breakdown.domainPreference = {
             domain,
             adjustmentFactor: factor,
             feedbackCount: prefs[domain].feedbackCount,
+            totalAdjustment: prefs[domain].totalAdjustment || 0,
+            lastUpdated: prefs[domain].lastUpdated || null,
             applied: true,
           };
           scoringResult.score = adjusted;
+        } else {
+          scoringResult.breakdown.domainPreference = { domain, applied: false };
         }
       } catch (_) {
         // Non-critical: proceed without domain adjustment
@@ -352,6 +356,14 @@ class RevolutionScoring {
     // Konvertiere alle BigInt-Werte zu Strings für JSON-Serialisierung
     const serializedPayload = this.convertBigIntsToStrings(ratingPayload);
 
+    // Validate against grammar (non-blocking)
+    if (typeof window.ScoringGrammarValidator === 'function') {
+      const result = new window.ScoringGrammarValidator().validateRatingMessage(serializedPayload);
+      if (!result.valid) {
+        console.warn('[RevolutionScoring] Rating grammar validation errors:', result.errors);
+      }
+    }
+
     // Sende verschlüsselte Nachricht an Website (type: 'rating' für rating messages)
     await messagingClient.sendMessage(serializedPayload, 'rating');
   }
@@ -528,6 +540,14 @@ class RevolutionScoring {
     try {
       // Konvertiere alle BigInt-Werte zu Strings für JSON-Serialisierung
       const serializedPayload = this.convertBigIntsToStrings(ratingPayload);
+
+      // Validate against grammar (non-blocking)
+      if (typeof window.ScoringGrammarValidator === 'function') {
+        const result = new window.ScoringGrammarValidator().validateRatingMessage(serializedPayload);
+        if (!result.valid) {
+          console.warn('[RevolutionScoring] Rating grammar validation errors:', result.errors);
+        }
+      }
 
       await messagingClient.sendMessage(serializedPayload, 'rating');
 

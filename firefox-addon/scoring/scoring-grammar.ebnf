@@ -1,0 +1,198 @@
+(* ========================================================================
+   Revolution Rating DSL - EBNF Grammar v2.0
+
+   Formal specification of rating, feedback, and correction message
+   structures as transmitted between addon, website, and server.
+
+   Note: Actual messages are JSON objects. This grammar documents
+   the expected structure and valid field values for validation.
+
+   Author: Andreas Lenkenhoff + Claude
+   Date: 2026-01-29, Updated: 2026-03-30
+   ======================================================================== *)
+
+(* ============================
+   Top-Level Message Types
+   ============================ *)
+
+message = rating_message | feedback_message | correction_message ;
+
+(* ============================
+   Rating Message
+   ============================ *)
+
+rating_message = "{" rating_fields "}" ;
+
+rating_fields = transaction_ref_field ","
+                wallet_address_field ","
+                domain_field ","
+                tokens_field ","
+                score_field ","
+                type_field ","
+                breakdown_field ","
+                distribution_field ","
+                metadata_field ","
+                occurred_at_field
+                { "," legacy_field } ;
+
+transaction_ref_field = "transaction_ref" ":" STRING ;    (* e.g. "tx-1234567890-abc123" *)
+wallet_address_field  = "wallet_address" ":" STRING ;     (* On-chain target address *)
+domain_field          = "domain" ":" STRING ;              (* e.g. "github.com" *)
+tokens_field          = "tokens" ":" STRING ;              (* BigInt as string *)
+score_field           = "score" ":" INTEGER ;              (* 0 - 10000 *)
+type_field            = "type" ":" ( "initial" | "correction" ) ;
+occurred_at_field     = "occurred_at" ":" TIMESTAMP ;
+
+(* ============================
+   Scoring Breakdown
+   ============================ *)
+
+breakdown_field = "breakdown" ":" "{" breakdown_entries "}" ;
+
+breakdown_entries = content_type_entry ","
+                    interaction_entry ","
+                    quality_entry ","
+                    oss_entry
+                    [ "," domain_preference_entry ] ;
+
+content_type_entry = "contentType" ":" "{"
+    "type" ":" content_type_enum ","
+    "multiplier" ":" NUMBER
+  "}" ;
+
+content_type_enum = "CODE_REPOSITORY" | "TOOL" | "PLAYGROUND"
+                  | "TUTORIAL" | "DOCUMENTATION" | "ARTICLE"
+                  | "BLOG_POST" | "VIDEO" | "PODCAST"
+                  | "DISCUSSION" | "NEWS" | "SOCIAL_FEED"
+                  | "IMAGE_GALLERY" | "OTHER" | "UNKNOWN" ;
+
+interaction_entry = "interaction" ":" "{"
+    "baseScore" ":" NUMBER ","
+    "activeTime" ":" NUMBER ","
+    "passiveTime" ":" NUMBER ","
+    "bonuses" ":" "{" { IDENTIFIER ":" NUMBER } "}"
+  "}" ;
+
+quality_entry = "quality" ":" "{"
+    "factor" ":" NUMBER ","       (* 0.5 - 1.1 *)
+    "trackers" ":" INTEGER ","
+    "ads" ":" INTEGER ","
+    "performance" ":" NUMBER
+  "}" ;
+
+oss_entry = "oss" ":" "{"
+    "bonus" ":" NUMBER ","        (* 0.0 - 0.5 *)
+    "multiplier" ":" NUMBER
+  "}" ;
+
+domain_preference_entry = "domainPreference" ":" "{"
+    "domain" ":" STRING ","
+    "applied" ":" BOOLEAN
+    [ "," "adjustmentFactor" ":" NUMBER ]     (* 0.5 - 2.0, present when applied=true *)
+    [ "," "feedbackCount" ":" INTEGER ]
+    [ "," "totalAdjustment" ":" NUMBER ]
+    [ "," "lastUpdated" ":" ( INTEGER | NULL ) ]
+  "}" ;
+
+(* ============================
+   Token Distribution
+   ============================ *)
+
+distribution_field = "distribution" ":" "{"
+    "rawTokens" ":" STRING ","
+    "payoutTokens" ":" STRING ","
+    "bufferedTokens" ":" STRING ","
+    "standardizedTokens" ":" STRING ","
+    "safetyFactor" ":" NUMBER ","       (* 0.0 - 1.0 *)
+    "payoutFactor" ":" NUMBER ","       (* 0.0 - 1.0 *)
+    "daysSinceStart" ":" INTEGER
+    [ "," "prognosis" ":" ( prognosis_block | NULL ) ]
+    [ "," "totalDaysTracked" ":" INTEGER ]
+    [ "," "currentDayOfMonth" ":" INTEGER ]
+  "}" ;
+
+prognosis_block = "{"
+    "weeklyScores" ":" "[" { NUMBER } "]" ","
+    "projectedMonthly" ":" NUMBER
+  "}" ;
+
+(* ============================
+   Metadata
+   ============================ *)
+
+metadata_field = "metadata" ":" "{"
+    "url" ":" ( STRING | NULL ) ","
+    "sessionId" ":" ( STRING | NULL ) ","
+    "timestamp" ":" ( TIMESTAMP | NULL ) ","
+    "configVersion" ":" ( STRING | NULL )
+  "}" ;
+
+(* ============================
+   Feedback Message
+   ============================ *)
+
+feedback_message = "{" feedback_fields "}" ;
+
+feedback_fields = "rating_ref" ":" STRING ","
+                  "feedback_type" ":" feedback_type_enum ","
+                  "domain" ":" STRING ","
+                  "submitted_at" ":" TIMESTAMP ;
+
+feedback_type_enum = "stars_1" | "stars_2" | "stars_3" | "stars_4" | "stars_5"
+                   | "thumbs_up" | "thumbs_down"
+                   | "too_high" | "too_low" | "correct" ;
+
+(* ============================
+   Correction Message
+   ============================ *)
+
+correction_message = "{" correction_fields "}" ;
+
+correction_fields = transaction_ref_field ","
+                    "original_ref" ":" STRING ","
+                    domain_field ","
+                    tokens_field ","
+                    score_field ","
+                    "type" ":" "correction" ","
+                    "reason" ":" STRING ","
+                    occurred_at_field ;
+
+(* ============================
+   Legacy Fields (backwards-compatible, optional)
+   ============================ *)
+
+legacy_field = "factor" ":" ( NUMBER | NULL )
+             | "watch_seconds" ":" ( NUMBER | NULL )
+             | "ad_seconds" ":" ( NUMBER | NULL )
+             | "interactions" ":" ( NUMBER | NULL )
+             | "token_amount" ":" STRING
+             | "payout_tokens" ":" STRING
+             | "buffered_tokens" ":" STRING
+             | "safety_factor" ":" NUMBER
+             | "payout_factor" ":" NUMBER
+             | "days_since_start" ":" INTEGER
+             | "normalized_compensation" ":" ( NUMBER | NULL )
+             | "buffer_rate" ":" ( NUMBER | NULL )
+             | "pacing_rate" ":" ( NUMBER | NULL )
+             | "deviation" ":" ( NUMBER | NULL )
+             | "backpay" ":" ( NUMBER | NULL )
+             | "raw_weight" ":" ( NUMBER | NULL )
+             | "calibration_day" ":" INTEGER ;
+
+(* ============================
+   Lexical Tokens
+   ============================ *)
+
+STRING    = '"' { CHARACTER } '"' ;
+INTEGER   = [ "-" ] DIGIT { DIGIT } ;
+NUMBER    = [ "-" ] DIGIT { DIGIT } [ "." DIGIT { DIGIT } ] ;
+BOOLEAN   = "true" | "false" ;
+NULL      = "null" ;
+TIMESTAMP = STRING ;                  (* ISO 8601 format, e.g. "2026-01-29T14:32:00.000Z" *)
+
+IDENTIFIER = LETTER { LETTER | DIGIT | "_" } ;
+CHARACTER  = (* Any character except unescaped double quote *) ;
+LETTER     = "A"-"Z" | "a"-"z" ;
+DIGIT      = "0"-"9" ;
+
+(* End of EBNF Grammar *)

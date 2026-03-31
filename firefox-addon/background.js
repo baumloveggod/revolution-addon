@@ -233,6 +233,12 @@ function resolveOrigin(rawUrl) {
       lastOriginHint = origin;
       return origin;
     }
+    // In debug mode, accept any localhost origin
+    if (window.RevolutionConfig && window.RevolutionConfig.DEBUG_MODE &&
+        window.RevolutionConfig.isLocalhostOrigin(rawUrl)) {
+      lastOriginHint = origin;
+      return origin;
+    }
     return null;
   } catch (err) {
     console.warn('[revolution-addon] Ungültige URL erhalten', err);
@@ -1475,6 +1481,20 @@ browser.runtime.onStartup.addListener(async () => {
 //     }
 //   }
 // });
+
+// In debug mode, inject content script for localhost tabs
+// (manifest.json only matches production domain, so localhost needs programmatic injection)
+if (window.RevolutionConfig && window.RevolutionConfig.DEBUG_MODE) {
+  browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.status === 'complete' && tab.url &&
+        window.RevolutionConfig.isLocalhostOrigin(tab.url)) {
+      browser.tabs.executeScript(tabId, {
+        file: 'contentScript.js',
+        runAt: 'document_idle'
+      }).catch(() => {});
+    }
+  });
+}
 
 /**
  * Retries wallet initialization if it previously failed
