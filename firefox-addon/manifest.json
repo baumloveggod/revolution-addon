@@ -34,7 +34,7 @@
   ],
   "browser_specific_settings": {
     "gecko": {
-      "id": "revolution-selfhosted@lenkenhoff.de",
+      "id": "{e1388eed-e872-4a9c-bd5e-89687109ec77}",
       "update_url": "https://updates.lenkenhoff.de/revolution-addon/updates.json",
       "data_collection_permissions": {
         "required": ["browsingActivity"]

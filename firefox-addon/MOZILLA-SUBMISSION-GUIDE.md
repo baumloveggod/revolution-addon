@@ -3,7 +3,7 @@
 
 ### 📦 Vorbereitete Dateien
 
-Bereits erstellt und bereit (Version 1.2.0, Add-on-ID `revolution-selfhosted@lenkenhoff.de` — abweichend von der Listed-Store-ID `revolution@lenkenhoff.de`, da AMO pro ID nur eine Einreichung erlaubt):
+Bereits erstellt und bereit (Version 1.2.0, Add-on-ID `{e1388eed-e872-4a9c-bd5e-89687109ec77}` — eine UUID statt eines lesbaren Namens, weil AMO sowohl `revolution@lenkenhoff.de` als auch `revolution-selfhosted@lenkenhoff.de` bereits als belegt/dupliziert zurückgewiesen hat):
 - ✅ `build/revolution-addon.zip` (420K) - Das Addon
 - ✅ `build/revolution-addon-source.zip` (444K) - Quellcode für Reviewer
 
