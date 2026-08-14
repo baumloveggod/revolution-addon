@@ -5,16 +5,22 @@
  * und historische Tracking-Daten für Prognose-Algorithmen.
  *
  * Formel: Übersetzungs-Faktor = 10^16 / (Summe aller Ratings letzten 30 Tage)
- * Erste 30 Tage: Faktor × (secondsSinceBaToCL / (30 * 24 * 60 * 60))
+ * Erste 30 Tage: Faktor x (secondsSinceBaToCL / (30 * 24 * 60 * 60))
  *
  * Storage Keys:
  * - rev_rating_history_30d: [{date, score, domain, ratingRef}, ...]
  * - rev_translation_factor_history: [{timestamp, factor, totalScore}, ...]
- * - rev_first_ba_to_cl_timestamp: Unix timestamp (seconds) of first BA→CL transfer
+ * - rev_first_ba_to_cl_timestamp: Unix timestamp (seconds) of first BA->CL transfer
  */
 
-class TranslationFactorTracker {
-  constructor(storage = browser.storage.local) {
+export class TranslationFactorTracker {
+  /**
+   * @param {Object} storage - Storage adapter (required, no default)
+   */
+  constructor(storage) {
+    if (!storage) {
+      throw new Error('TranslationFactorTracker requires a storage adapter');
+    }
     this.storage = storage;
     this.BUDGET_TOKENS = 10n ** 16n; // 10^16 tokens per user per 30 days
     this.HISTORY_DAYS = 30;
@@ -55,6 +61,32 @@ class TranslationFactorTracker {
   }
 
   /**
+   * Aktualisiert ein bestehendes Rating in der Historie (z. B. nach einer
+   * manuellen Dashboard-Korrektur). Es wird KEIN neues Rating angelegt — der
+   * vorhandene Eintrag mit der gegebenen ratingRef wird mutiert.
+   *
+   * Wird vom RetroPayoutService.processCorrection aufgerufen, nachdem das
+   * Addon eine 'rating_correction' Nachricht empfangen hat.
+   *
+   * @param {string} ratingRef - Eindeutige Rating-Referenz (correction_of)
+   * @param {Object} updates - { score?: number }
+   * @returns {Promise<Object|null>} Das aktualisierte Rating oder null wenn nicht gefunden
+   */
+  async updateRating(ratingRef, updates) {
+    const data = await this.storage.get(['rev_rating_history_30d']);
+    const history = data.rev_rating_history_30d || [];
+    const idx = history.findIndex(r => r.ratingRef === ratingRef);
+    if (idx === -1) {
+      return null;
+    }
+    if (updates && Number.isFinite(updates.score)) {
+      history[idx].score = updates.score;
+    }
+    await this.storage.set({ rev_rating_history_30d: history });
+    return history[idx];
+  }
+
+  /**
    * Holt alle Ratings der letzten 30 Tage
    *
    * @returns {Promise<Array>} Ratings [{date, score, domain, ratingRef}, ...]
@@ -72,7 +104,7 @@ class TranslationFactorTracker {
    * Berechnet den aktuellen Übersetzungs-Faktor
    *
    * Formel: 10^16 / (Summe aller Ratings letzten 30 Tage)
-   * Erste 30 Tage: baseFactor × (secondsSinceBaToCL / (30 * 24 * 60 * 60))
+   * Erste 30 Tage: baseFactor x (secondsSinceBaToCL / (30 * 24 * 60 * 60))
    *
    * @returns {Promise<bigint>} Translation Factor (BigInt)
    */
@@ -82,7 +114,7 @@ class TranslationFactorTracker {
     // Summe aller Scores
     const totalScore = ratings.reduce((sum, r) => sum + (r.score || 0), 0);
 
-    // Fallback: Keine Ratings → Faktor = 0 (keine Basis für Berechnung)
+    // Fallback: Keine Ratings -> Faktor = 0 (keine Basis für Berechnung)
     if (totalScore === 0) {
       console.warn('[TranslationFactorTracker] No ratings in last 30 days, factor = 0');
       return 0n; // Kein Faktor ohne Ratings
@@ -102,7 +134,7 @@ class TranslationFactorTracker {
     const millisSinceFirstTransfer = now - (firstTransferTimestamp * 1000); // firstTransferTimestamp ist in Sekunden
     const thirtyDaysInMillis = 30 * 24 * 60 * 60 * 1000; // Millisekunden
 
-    // timeMultiplier: 0.0 → 1.0 über 30 Tage
+    // timeMultiplier: 0.0 -> 1.0 über 30 Tage
     const timeMultiplier = Math.min(1.0, millisSinceFirstTransfer / thirtyDaysInMillis);
 
     // Finaler Faktor mit Dämpfung
@@ -112,7 +144,7 @@ class TranslationFactorTracker {
   }
 
   /**
-   * Speichert den Timestamp des ersten BA→CL Transfers
+   * Speichert den Timestamp des ersten BA->CL Transfers
    * Wird nur einmal gesetzt (erste Transaktion)
    *
    * @param {number} timestamp - Unix timestamp in Sekunden
@@ -129,7 +161,7 @@ class TranslationFactorTracker {
   }
 
   /**
-   * Holt den Timestamp des ersten BA→CL Transfers
+   * Holt den Timestamp des ersten BA->CL Transfers
    *
    * @returns {Promise<number|null>} Unix timestamp in Sekunden, oder null falls nicht gesetzt
    */
@@ -139,7 +171,7 @@ class TranslationFactorTracker {
   }
 
   /**
-   * Prüft ob ein BA→CL Transfer existiert
+   * Prüft ob ein BA->CL Transfer existiert
    * Unterscheidet zwischen:
    * - null: Kein Transfer vorhanden (Rating verwerfen)
    * - Error: Central Ledger nicht erreichbar (Rating pausieren)
@@ -166,7 +198,7 @@ class TranslationFactorTracker {
       const wallet = await walletManager.getLocalWallet();
       if (!wallet || !wallet.address) {
         // Wallet not initialized yet - this is a temporary state during startup
-        // Don't pause scoring, just skip the BA→CL check for now
+        // Don't pause scoring, just skip the BA->CL check for now
         console.warn('[TranslationFactorTracker] CL wallet not initialized yet');
         return { exists: false, shouldPause: false, error: 'CL wallet not initialized yet' };
       }
@@ -178,12 +210,12 @@ class TranslationFactorTracker {
         return { exists: true, shouldPause: false, error: null };
       } else {
         // Kein Transfer gefunden (aber CL erreichbar)
-        return { exists: false, shouldPause: false, error: 'No BA→CL transfer found' };
+        return { exists: false, shouldPause: false, error: 'No BA->CL transfer found' };
       }
 
     } catch (error) {
       // Central Ledger nicht erreichbar oder anderer Fehler
-      console.error('[TranslationFactorTracker] Failed to check BA→CL transfer:', error);
+      console.error('[TranslationFactorTracker] Failed to check BA->CL transfer:', error);
 
       // Only pause if this is a real CL connectivity error, not a wallet initialization issue
       const isInitializationError = error.message.includes('not available') ||
@@ -305,14 +337,4 @@ class TranslationFactorTracker {
   async clearOldData() {
     await this.storage.remove(['rev_rating_history_30d', 'rev_translation_factor_history']);
   }
-}
-
-// Export für Browser-Extension (non-module)
-if (typeof window !== 'undefined') {
-  window.TranslationFactorTracker = TranslationFactorTracker;
-}
-
-// Export für Node.js/Tests
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = TranslationFactorTracker;
 }

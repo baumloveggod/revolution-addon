@@ -12,7 +12,12 @@
  * WICHTIG: Deterministisch - gleiche Inputs → gleicher Score
  */
 
-class ScoringEngine {
+import { ContentDetector } from './content-detector.js';
+import { InteractionScorer } from './interaction-scorer.js';
+import { QualityAnalyzer } from './quality-analyzer.js';
+import { SatisfactionScorer } from './satisfaction-scorer.js';
+
+export class ScoringEngine {
   constructor(config, contentDetector, interactionScorer, qualityAnalyzer, satisfactionScorer = null) {
     this.config = config;
     this.contentDetector = contentDetector;
@@ -353,16 +358,14 @@ class ScoringEngine {
   }
 }
 
-// Factory Function für einfache Initialisierung
-function createScoringEngine(config) {
-  const contentDetector = new window.ContentDetector(config);
-  const interactionScorer = new window.InteractionScorer(config);
-  const qualityAnalyzer = new window.QualityAnalyzer(config);
-
-  // v2.0.0: Instantiate SatisfactionScorer if available
-  const satisfactionScorer = window.SatisfactionScorer
-    ? new window.SatisfactionScorer(config)
-    : null;
+/**
+ * Factory Function für einfache Initialisierung
+ */
+export function createScoringEngine(config) {
+  const contentDetector = new ContentDetector(config);
+  const interactionScorer = new InteractionScorer(config);
+  const qualityAnalyzer = new QualityAnalyzer(config);
+  const satisfactionScorer = new SatisfactionScorer(config);
 
   return new ScoringEngine(
     config,
@@ -371,18 +374,4 @@ function createScoringEngine(config) {
     qualityAnalyzer,
     satisfactionScorer
   );
-}
-
-// Export für Browser-Extension (non-module)
-if (typeof window !== 'undefined') {
-  window.ScoringEngine = ScoringEngine;
-  window.createScoringEngine = createScoringEngine;
-}
-
-// Export für Node.js/Tests
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = {
-    ScoringEngine,
-    createScoringEngine
-  };
 }

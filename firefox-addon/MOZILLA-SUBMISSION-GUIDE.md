@@ -3,9 +3,9 @@
 
 ### 📦 Vorbereitete Dateien
 
-Bereits erstellt und bereit:
-- ✅ `build/revolution-addon.zip` (374K) - Das Addon
-- ✅ `build/revolution-addon-source.zip` (397K) - Quellcode für Reviewer
+Bereits erstellt und bereit (Version 1.1.0, Add-on-ID `revolution@lenkenhoff.de`):
+- ✅ `build/revolution-addon.zip` (420K) - Das Addon
+- ✅ `build/revolution-addon-source.zip` (444K) - Quellcode für Reviewer
 
 ---
 
@@ -38,7 +38,7 @@ Bereits erstellt und bereit:
 ### 4. Addon-Datei hochladen
 
 1. Klicken Sie auf **"Select a file..."**
-2. Wählen Sie: `/Users/andreaslenkenhoff/Documents/revolution/firefox-addon/build/revolution-addon.zip`
+2. Wählen Sie: `/Volumes/1tb-dev/revolution/revolution-addon/firefox-addon/build/revolution-addon.zip`
 3. Warten Sie auf die automatische Validierung (1-2 Minuten)
 
 **Bei Validierungs-Fehlern:**
@@ -49,12 +49,18 @@ Bereits erstellt und bereit:
 
 **Frage:** "Do you use any code generators, transpilers, minifiers, or other tools to generate the code?"
 
-**Antwort:** ✅ **JA**
+**Antwort:** ✅ **Nein**
+
+Das Addon lädt alle Wallet-/Scoring-Module (`vendor/revolution-client/`) direkt
+als unveränderten, lesbaren Quellcode über `background.html`. Es gibt keinen
+Bundler-Schritt mehr (früher: Rollup → `wallet/wallet-bundle.js`). Die einzige
+Ausnahme ist `sodium.js`, ein unverändertes Drittanbieter-Release (siehe
+Schritt 7).
 
 ### 6. Quellcode hochladen
 
 1. Klicken Sie auf **"Upload source code"**
-2. Wählen Sie: `/Users/andreaslenkenhoff/Documents/revolution/firefox-addon/build/revolution-addon-source.zip`
+2. Wählen Sie: `/Volumes/1tb-dev/revolution/revolution-addon/firefox-addon/build/revolution-addon-source.zip`
 
 ### 7. Build-Prozess erklären
 
@@ -70,12 +76,16 @@ https://cdn.jsdelivr.net/npm/libsodium-wrappers@0.7.13/dist/browsers/sodium.js
 Quellcode: https://github.com/jedisct1/libsodium.js
 
 Das Addon verwendet KEINE Build-Tools, Bundler oder Transpiler.
-Alle anderen Dateien sind unminifiziert und direkt lesbar.
+Alle anderen Dateien sind unminifiziert und direkt lesbar, einschließlich
+der Wallet-/Scoring-/Distribution-Module in vendor/revolution-client/.
 
 Build-Anleitung:
 1. cd firefox-addon
 2. ./build-addon.sh
-3. Das Script erstellt lediglich ein ZIP-Archiv ohne Code-Transformationen
+3. Das Script kopiert lediglich vendor/revolution-client/*.js unverändert
+   aus dem separat gepflegten Quellpaket packages/revolution-wallet und
+   erstellt anschließend ein ZIP-Archiv. Es findet keine Code-Transformation
+   statt (kein Bundler, kein Minifier, kein Transpiler).
 
 Der Quellcode enthält auch ein README-FOR-REVIEWERS.md mit
 detaillierten Informationen.
@@ -83,7 +93,7 @@ detaillierten Informationen.
 
 ### 8. Addon-Details ausfüllen
 
-**Version Number:** `0.1.9` (bereits in manifest.json)
+**Version Number:** `1.1.0` (bereits in manifest.json)
 
 **Release Notes (optional):**
 ```
@@ -108,10 +118,13 @@ Funktioniert mit localhost:3000.
 - Prüft manifest.json
 - Scannt nach offensichtlichen Problemen
 
-### Manuelle Review (ca. 2-24 Stunden bei Selbst-Distribution)
-- Mozilla-Reviewer prüfen den Code
-- Überprüfen Sicherheit und Richtlinien
-- Prüfen Quellcode vs. minifizierte Dateien
+### Manuelle Review (nur falls von AMO angefordert)
+- Bei "Nein" auf die Build-Tools-Frage signiert AMO bei "On your own" in der
+  Regel automatisch direkt nach der Validierung, ohne manuelle Review
+  (2-24 Stunden manuelle Prüfung sind der Fallback, falls das Addon Code-
+  Generatoren/Bundler meldet oder der automatische Scan etwas markiert)
+- Falls doch eine manuelle Review stattfindet: Mozilla-Reviewer prüfen den
+  Code, Sicherheit und Richtlinien, Quellcode vs. minifizierte Dateien
 
 ### Genehmigung
 Sie erhalten eine E-Mail mit:

@@ -29,10 +29,10 @@
 class AnonTransactionClient {
   constructor(config = {}) {
     // Write-server (POST /anon/mint)
-    this.anonApiUrl   = config.anonApiUrl   || 'https://192.168.178.130:4100/anon';
-    this.clApiUrl     = config.clApiUrl     || 'https://192.168.178.130:4100';
+    this.anonApiUrl   = config.anonApiUrl   || 'https://ledger.lenkenhoff.de/anon';
+    this.clApiUrl     = config.clApiUrl     || 'https://ledger.lenkenhoff.de';
     // Read-server (GET /anon/blocks/*, GET /wallets/*/registration)
-    this.clReadApiUrl = config.clReadApiUrl || 'https://192.168.178.130:4101';
+    this.clReadApiUrl = config.clReadApiUrl || 'https://read.lenkenhoff.de';
     this.fetch        = config.fetch || globalThis.fetch.bind(globalThis);
     this.sodium       = config.sodium || null;
   }
@@ -140,7 +140,8 @@ class AnonTransactionClient {
         signature: signature,
         amount: amount.toString(),
         to: destinationAddress,
-        fingerprint
+        fingerprint,
+        timestamp: Date.now()
       };
 
       // NOTE: blockId is intentionally NOT sent — sending it would link mint to spend
@@ -207,39 +208,54 @@ class AnonTransactionClient {
   }
 
   /**
-   * Wait for block to be sealed (polling)
+   * Wait for block to be sealed (non-blocking async polling)
+   *
+   * Starts polling in the background and returns a Promise that resolves when
+   * the block is sealed or the timeout is reached. Multiple concurrent calls
+   * are deduplicated — only one poll loop runs per blockId at a time.
    *
    * @param {string} blockId - Block ID
-   * @param {number} maxWaitMs - Maximum wait time in milliseconds (default: 60 seconds)
-   * @param {number} pollIntervalMs - Polling interval (default: 2 seconds)
+   * @param {number} maxWaitMs - Maximum wait time in milliseconds (default: 5 minutes)
+   * @param {number} pollIntervalMs - Polling interval (default: 10 seconds)
    * @returns {Promise<boolean>} true if block sealed, false if timeout
    */
-  async waitForBlockSeal(blockId, maxWaitMs = 60000, pollIntervalMs = 2000) {
-    console.log('[AnonTxClient] 📍 waitForBlockSeal:', { blockId, maxWaitMs });
-
-    const startTime = Date.now();
-
-    while (Date.now() - startTime < maxWaitMs) {
-      try {
-        const { canSpend, status } = await this.checkBlockStatus(blockId);
-
-        if (canSpend) {
-          console.log('[AnonTxClient] ✅ Block sealed!', { blockId, status });
-          return true;
-        }
-
-        console.log('[AnonTxClient] Block not yet sealed, waiting...', { blockId, status });
-        await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
-
-      } catch (error) {
-        console.error('[AnonTxClient] ❌ Error checking block status:', error);
-        // Continue polling despite errors
-        await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
-      }
+  waitForBlockSeal(blockId, maxWaitMs = 300000, pollIntervalMs = 10000) {
+    // Deduplicate: return existing promise if already polling this blockId
+    if (!this._blockSealPromises) this._blockSealPromises = new Map();
+    if (this._blockSealPromises.has(blockId)) {
+      return this._blockSealPromises.get(blockId);
     }
 
-    console.warn('[AnonTxClient] ⚠️ Timeout waiting for block seal:', { blockId, maxWaitMs });
-    return false; // Timeout
+    const promise = (async () => {
+      console.log('[AnonTxClient] 📍 waitForBlockSeal:', { blockId, maxWaitMs, pollIntervalMs });
+      const startTime = Date.now();
+
+      while (Date.now() - startTime < maxWaitMs) {
+        try {
+          const { canSpend, status } = await this.checkBlockStatus(blockId);
+
+          if (canSpend) {
+            console.log('[AnonTxClient] ✅ Block sealed!', { blockId, status });
+            return true;
+          }
+
+          console.log('[AnonTxClient] Block not yet sealed, waiting...', { blockId, status });
+        } catch (error) {
+          console.error('[AnonTxClient] ❌ Error checking block status:', error);
+          // Continue polling despite errors
+        }
+
+        await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+      }
+
+      console.warn('[AnonTxClient] ⚠️ Timeout waiting for block seal:', { blockId, maxWaitMs });
+      return false;
+    })().finally(() => {
+      this._blockSealPromises?.delete(blockId);
+    });
+
+    this._blockSealPromises.set(blockId, promise);
+    return promise;
   }
 
   /**

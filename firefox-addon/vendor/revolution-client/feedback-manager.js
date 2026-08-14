@@ -13,22 +13,24 @@
  *   pending_corrections - Array of correction transactions awaiting processing
  *
  * Platform compatibility:
- *   Accepts any StorageAdapter (browser.storage.local wrapper, electron-store, AsyncStorage).
+ *   Accepts any StorageAdapter.
  *   The adapter must implement:
- *     get(key)          → Promise<value | null>
- *     set(key, value)   → Promise<void>
- *   Falls back to browser.storage.local directly if no adapter is provided.
+ *     get(key)          -> Promise<value | null>
+ *     set(key, value)   -> Promise<void>
  */
 
-class FeedbackManager {
+export class FeedbackManager {
   /**
-   * @param {Object} [storageAdapter] - Optional StorageAdapter (platform-independent).
-   *   If omitted, uses browser.storage.local wrapped to match the adapter interface.
+   * @param {Object} storage - Required StorageAdapter (platform-independent).
+   *   Must implement get(key) and set(key, value).
    */
-  constructor(storageAdapter) {
-    this.storage = storageAdapter || FeedbackManager._makeBrowserStorageAdapter();
+  constructor(storage) {
+    if (!storage) {
+      throw new Error('FeedbackManager requires a storage adapter');
+    }
+    this.storage = storage;
 
-    // Score delta → token threshold to trigger a correction transaction
+    // Score delta -> token threshold to trigger a correction transaction
     this.CORRECTION_THRESHOLD_TOKENS = 1000;
 
     // Exponential moving average learning rate for domain preferences
@@ -53,26 +55,6 @@ class FeedbackManager {
     };
 
     this.VALID_FEEDBACK_TYPES = new Set(Object.keys(this.BASE_DELTAS));
-  }
-
-  /**
-   * Wraps browser.storage.local to match the StorageAdapter interface:
-   *   get(key) → Promise<value | null>
-   *   set(key, value) → Promise<void>
-   *
-   * This keeps FeedbackManager decoupled from the browser API directly
-   * and ready for extraction into the platform-independent core module.
-   */
-  static _makeBrowserStorageAdapter() {
-    return {
-      async get(key) {
-        const result = await browser.storage.local.get(key);
-        return result[key] !== undefined ? result[key] : null;
-      },
-      async set(key, value) {
-        await browser.storage.local.set({ [key]: value });
-      },
-    };
   }
 
   /**
@@ -128,7 +110,7 @@ class FeedbackManager {
     return { correction, preference_updated: true };
   }
 
-  // ─── Private helpers ──────────────────────────────────────────────────────
+  // --- Private helpers ---
 
   _validate(feedback) {
     if (!feedback || typeof feedback !== 'object') {
@@ -223,9 +205,4 @@ class FeedbackManager {
 
     await this.storage.set('feedback_history', history);
   }
-}
-
-// Expose as global for non-module addon context
-if (typeof window !== 'undefined') {
-  window.FeedbackManager = FeedbackManager;
 }

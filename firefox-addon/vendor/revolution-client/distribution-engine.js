@@ -5,34 +5,39 @@
  *
  * System: Kontinuierliche Safety/Payout-Funktion
  * - Tag 1-30: 99% Safety (1% Payout)
- * - Tag 30-90: Linear von 99% → 0% Safety (1% → 100% Payout)
+ * - Tag 30-90: Linear von 99% -> 0% Safety (1% -> 100% Payout)
  * - Ab Tag 90: 0% Safety (100% Payout)
  *
  * WICHTIG:
  * - Deterministisch
  * - Privacy-aware (E24-Standardisierung)
- * - Fairness (Monatsende garantiert 10€)
+ * - Fairness (Monatsende garantiert 10 EUR)
  * - Keine expliziten Phasen, nur mathematische Funktion
  */
 
-class DistributionEngine {
-  constructor(config, prognosisModel, calibrationManager, privacyLayer, entityResolver = null) {
+export class DistributionEngine {
+  /**
+   * @param {Object} config - Scoring config
+   * @param {Object} prognosisModel - PrognosisModel instance
+   * @param {Object} calibrationManager - CalibrationManager instance
+   * @param {Object} privacyLayer - Privacy layer instance
+   * @param {Object} entityResolver - EntityResolver instance (optional)
+   * @param {Object} translationFactorTracker - TranslationFactorTracker instance (optional)
+   * @param {Object} fluctuationSF - FluctuationSafetyFactor instance (optional)
+   * @param {Object} storage - Storage adapter (required)
+   */
+  constructor(config, prognosisModel, calibrationManager, privacyLayer, entityResolver = null, translationFactorTracker = null, fluctuationSF = null, storage = null) {
+    if (!storage) {
+      throw new Error('DistributionEngine requires a storage adapter');
+    }
     this.config = config;
     this.prognosisModel = prognosisModel;
     this.calibrationManager = calibrationManager;
-    this.privacyLayer = privacyLayer; // Wird später initialisiert
-    this.entityResolver = entityResolver || (typeof window !== 'undefined' && window.EntityResolver ? new window.EntityResolver() : null);
-
-    // NEU: Translation Factor Tracker
-    this.translationFactorTracker = typeof window !== 'undefined' && window.TranslationFactorTracker
-      ? new window.TranslationFactorTracker()
-      : null;
-
-    // NEU: Fluctuation Safety Factor (aktiviert ab Tag 10)
-    this.fluctuationSF = typeof window !== 'undefined' && window.FluctuationSafetyFactor
-      ? new window.FluctuationSafetyFactor()
-      : null;
-
+    this.privacyLayer = privacyLayer;
+    this.entityResolver = entityResolver;
+    this.translationFactorTracker = translationFactorTracker;
+    this.fluctuationSF = fluctuationSF;
+    this.storage = storage;
   }
 
   /**
@@ -40,8 +45,8 @@ class DistributionEngine {
    *
    * Kontinuierliche Funktion ohne explizite Phasen:
    * - t < 30: safetyFactor = 0.99 (99% Puffer, 1% Auszahlung)
-   * - 30 ≤ t < 90: safetyFactor = 0.99 - ((t - 30) / 60) * 0.99 (linear fallend)
-   * - t ≥ 90: safetyFactor = 0.0 (0% Puffer, 100% Auszahlung)
+   * - 30 <= t < 90: safetyFactor = 0.99 - ((t - 30) / 60) * 0.99 (linear fallend)
+   * - t >= 90: safetyFactor = 0.0 (0% Puffer, 100% Auszahlung)
    *
    * Der payoutFactor ist einfach: payoutFactor = 1.0 - safetyFactor
    *
@@ -53,7 +58,7 @@ class DistributionEngine {
       // Erste 30 Tage: 99% Puffer (1% Auszahlung)
       return 0.99;
     } else if (daysSinceStart < 90) {
-      // Tag 30-90: Linear von 99% → 0%
+      // Tag 30-90: Linear von 99% -> 0%
       // Formel: 0.99 - ((daysSinceStart - 30) / 60) * 0.99
       const progress = (daysSinceStart - 30) / 60; // 0.0 bis 1.0
       return 0.99 - (progress * 0.99);
@@ -148,7 +153,7 @@ class DistributionEngine {
     }
 
     // 2. Token-Berechnung mit neuem Faktor
-    // rawTokens = Score × TranslationFactor
+    // rawTokens = Score x TranslationFactor
     const scoreBigInt = BigInt(Math.floor(scoringResult.score));
     const rawTokens = scoreBigInt * translationFactor;
 
@@ -157,7 +162,7 @@ class DistributionEngine {
     }
 
     // 3. ALLE DREI Sicherheitsfaktoren anwenden
-    // combinedSF = startSafetyFactor × prognosisSafetyFactor × fluctuationSafetyFactor
+    // combinedSF = startSafetyFactor x prognosisSafetyFactor x fluctuationSafetyFactor
     // payoutFactor = 1.0 - safetyFactor (Start-SF)
     const combinedPayoutFactor = payoutFactor * prognosisSafetyFactor * fluctuationSafetyFactor;
 
@@ -170,12 +175,11 @@ class DistributionEngine {
       : payoutTokens;
 
     // 5. Hole Wallet-Adresse für die Domain
-    // domain wurde bereits oben deklariert (Zeile 142)
     const { address: walletAddress, isNewWallet } = await this._resolveWalletWithMeta(domain);
 
     // 5b. Warnung wenn keine gültige Wallet-Adresse
     if (walletAddress.startsWith('pending:')) {
-      console.error('[DistributionEngine] ❌ CRITICAL: No valid wallet address for domain:', domain);
+      console.error('[DistributionEngine] CRITICAL: No valid wallet address for domain:', domain);
       console.error('[DistributionEngine] Transaction will likely fail at execution time!');
     }
 
@@ -304,7 +308,7 @@ class DistributionEngine {
   }
 
   /**
-   * Monatsende-Korrektur (GARANTIERT 10€)
+   * Monatsende-Korrektur (GARANTIERT 10 EUR)
    */
   async executeMonthEndSettlement(monthData, userPreferences = []) {
     const { scores, paidAmounts } = monthData;
@@ -410,8 +414,8 @@ class DistributionEngine {
    * 2. Falls nicht gecacht: Holt von server-api /entity/resolve
    * 3. Speichert in Cache für zukünftige Verwendung
    */
-  async getWalletAddressForDomain(domain, storage = browser.storage.local) {
-    const result = await this._resolveWalletWithMeta(domain, storage);
+  async getWalletAddressForDomain(domain) {
+    const result = await this._resolveWalletWithMeta(domain);
     return result.address;
   }
 
@@ -420,8 +424,8 @@ class DistributionEngine {
    * Wird für queueTransaction-Aufrufe verwendet um Timing-Angriffe zu verhindern
    * @returns {Promise<{address: string, isNewWallet: boolean}>}
    */
-  async _resolveWalletWithMeta(domain, storage = browser.storage.local) {
-    const data = await storage.get(['rev_domain_wallets', 'rev_user_token', 'rev_new_wallets']);
+  async _resolveWalletWithMeta(domain) {
+    const data = await this.storage.get(['rev_domain_wallets', 'rev_user_token', 'rev_new_wallets']);
     const domainWallets = data.rev_domain_wallets || {};
     const newWallets = data.rev_new_wallets || {};
     const userToken = data.rev_user_token;
@@ -436,10 +440,10 @@ class DistributionEngine {
       return { address: cachedAddress, isNewWallet };
     }
 
-    // 2. Nicht gecacht → von API holen (wenn EntityResolver verfügbar)
+    // 2. Nicht gecacht -> von API holen (wenn EntityResolver verfügbar)
     if (this.entityResolver && userToken) {
       try {
-        const resolved = await this.entityResolver.getAndCacheWalletAddress(domain, userToken, storage);
+        const resolved = await this.entityResolver.getAndCacheWalletAddress(domain, userToken, this.storage);
         return resolved; // {address, isNewWallet}
       } catch (error) {
         console.error('[DistributionEngine] Failed to fetch wallet address from API:', error.message);
@@ -455,7 +459,7 @@ class DistributionEngine {
     }
 
     // 3. Fallback: Verwende Domain als Platzhalter
-    console.error('[DistributionEngine] ❌ FALLBACK: No wallet address available for domain:', {
+    console.error('[DistributionEngine] FALLBACK: No wallet address available for domain:', {
       domain: domain,
       hasEntityResolver: !!this.entityResolver,
       hasUserToken: !!userToken,
@@ -469,13 +473,13 @@ class DistributionEngine {
    * Speichert Wallet-Adresse für eine Domain
    * Wird vom MessagingIntegration aufgerufen wenn KEY_UPDATE empfangen wird
    */
-  async saveWalletAddressForDomain(domain, walletAddress, storage = browser.storage.local) {
-    const data = await storage.get(['rev_domain_wallets']);
+  async saveWalletAddressForDomain(domain, walletAddress) {
+    const data = await this.storage.get(['rev_domain_wallets']);
     const domainWallets = data.rev_domain_wallets || {};
 
     domainWallets[domain] = walletAddress;
 
-    await storage.set({ rev_domain_wallets: domainWallets });
+    await this.storage.set({ rev_domain_wallets: domainWallets });
   }
 
   /**
@@ -522,8 +526,8 @@ class DistributionEngine {
   /**
    * Holt User-Daten für Distribution
    */
-  async getUserData(storage = browser.storage.local) {
-    const data = await storage.get([
+  async getUserData() {
+    const data = await this.storage.get([
       'rev_first_tracking_date',
       'rev_historical_scores',
       'rev_paid_amounts'
@@ -556,25 +560,13 @@ class DistributionEngine {
   /**
    * Speichert bezahlte Beträge
    */
-  async savePaidAmount(domain, amount, storage = browser.storage.local) {
-    const data = await storage.get(['rev_paid_amounts']);
+  async savePaidAmount(domain, amount) {
+    const data = await this.storage.get(['rev_paid_amounts']);
     const paidAmounts = data.rev_paid_amounts || {};
 
     const currentAmount = paidAmounts[domain] || 0n;
     paidAmounts[domain] = currentAmount + amount;
 
-    await storage.set({ rev_paid_amounts: paidAmounts });
+    await this.storage.set({ rev_paid_amounts: paidAmounts });
   }
-}
-
-// Export für Browser-Extension (non-module)
-if (typeof window !== 'undefined') {
-  window.DistributionEngine = DistributionEngine;
-} else {
-  console.warn('[DistributionEngine] ⚠️ window is undefined, cannot export');
-}
-
-// Export für Node.js/Tests
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = DistributionEngine;
 }

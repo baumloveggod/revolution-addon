@@ -12,6 +12,19 @@ OUTPUT_FILE="$BUILD_DIR/revolution-addon.zip"
 echo "🔨 Building Revolution Firefox Addon..."
 echo "📁 Source: $ADDON_DIR"
 
+# Wallet-/Scoring-Quellen aus packages/revolution-wallet uebernehmen (reines
+# Kopieren, keine Transformation) - haelt vendor/revolution-client/ aktuell.
+WALLET_SRC="$ADDON_DIR/../packages/revolution-wallet/src"
+VENDOR_DIR="$ADDON_DIR/vendor/revolution-client"
+echo "📚 Syncing wallet/scoring sources from packages/revolution-wallet..."
+mkdir -p "$VENDOR_DIR"
+for f in "$WALLET_SRC"/*.js; do
+  base="$(basename "$f")"
+  # node-storage-adapter ist reiner Node.js-Code und wird im Addon nie geladen
+  [ "$base" = "node-storage-adapter.js" ] && continue
+  cp "$f" "$VENDOR_DIR/$base"
+done
+
 # Erstelle Build-Verzeichnis
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
@@ -42,8 +55,7 @@ echo "📦 Copying addon files..."
 # Kopiere alle Dateien außer die ausgeschlossenen
 rsync -av \
   --exclude='build/' \
-  --exclude='build-addon.sh' \
-  --exclude='check-addon-storage.sh' \
+  --exclude='*.sh' \
   --exclude='check-registration-status.html' \
   --exclude='debug-messaging.js' \
   --exclude='TESTING.md' \

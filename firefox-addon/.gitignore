@@ -1,2 +1,9 @@
 # Dev-only credentials — never commit
 dev-credentials.json
+
+# AMO API-Zugangsdaten für sign-lite.sh — never commit
+.amo-credentials
+
+# Build-Artefakte
+build/
+dist/

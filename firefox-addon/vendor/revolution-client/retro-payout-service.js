@@ -12,8 +12,17 @@
  * - Nutzt TransactionCorrector für eigentliche Ausführung
  */
 
-class RetroPayoutService {
-  constructor(distributionEngine, translationFactorTracker, messagingClient, storage = browser.storage.local) {
+export class RetroPayoutService {
+  /**
+   * @param {Object} distributionEngine - DistributionEngine instance
+   * @param {Object} translationFactorTracker - TranslationFactorTracker instance
+   * @param {Object} messagingClient - MessagingClient instance
+   * @param {Object} storage - Storage adapter (required, no default)
+   */
+  constructor(distributionEngine, translationFactorTracker, messagingClient, storage) {
+    if (!storage) {
+      throw new Error('RetroPayoutService requires a storage adapter');
+    }
     this.distributionEngine = distributionEngine;
     this.tracker = translationFactorTracker;
     this.messagingClient = messagingClient;
@@ -121,26 +130,12 @@ class RetroPayoutService {
         totalTokens: totalPayoutTokens.toString()
       };
 
-      console.log('[RetroPayoutService] ✅ Check completed:', stats);
-
-      // Log to DebugLogger
-      if (typeof DebugLogger !== 'undefined') {
-        DebugLogger.info('retro_payout_check', 'Retro payout check completed', stats);
-      }
+      console.log('[RetroPayoutService] Check completed:', stats);
 
       return stats;
 
     } catch (error) {
-      console.error('[RetroPayoutService] ❌ Error during retro payout check:', error);
-
-      // Log error
-      if (typeof DebugLogger !== 'undefined') {
-        DebugLogger.error('retro_payout_error', 'Retro payout check failed', {
-          errorMessage: error.message,
-          errorStack: error.stack
-        });
-      }
-
+      console.error('[RetroPayoutService] Error during retro payout check:', error);
       throw error;
     } finally {
       this.isRunning = false;
@@ -150,7 +145,7 @@ class RetroPayoutService {
   /**
    * Prüft ein einzelnes Rating auf Nachzahlungs-Bedarf
    *
-   * BEDINGUNG: 3 * Σ(istTokens) < sollTokens (neu berechnet)
+   * BEDINGUNG: 3 * Summe(istTokens) < sollTokens (neu berechnet)
    *
    * @returns {Promise<Object>} { payoutCreated: boolean, payoutTokens: string }
    */
@@ -205,14 +200,14 @@ class RetroPayoutService {
   async calculateSollTokens(rating, currentFactor, prognosisSF, userData) {
     const score = BigInt(rating.score);
 
-    // Raw Tokens = Score × Translation Factor
+    // Raw Tokens = Score x Translation Factor
     const rawTokens = score * currentFactor;
 
     // Start Safety Factor (zeitbasiert)
     const daysSinceRating = Math.floor((Date.now() - rating.timestamp) / (24 * 60 * 60 * 1000));
     const startSF = this.distributionEngine.calibrationManager.calculateSafetyFactor(daysSinceRating);
 
-    // Combined Payout Factor = (1 - startSF) × prognosisSF
+    // Combined Payout Factor = (1 - startSF) x prognosisSF
     const payoutFactor = (1.0 - startSF) * prognosisSF;
 
     // Soll-Tokens
@@ -227,10 +222,6 @@ class RetroPayoutService {
   async createCorrectionTransaction(rating, existingTxs, sollTokens, istTokensSum, differenz, currentFactor, prognosisSF) {
     // Pair Index = Anzahl bisheriger Transaktionen
     const pairIndex = existingTxs.length;
-
-    // Nutze FingerprintSeedManager für Fingerprint-Generierung
-    const seedManager = new window.FingerprintSeedManager(this.storage);
-    const fingerprints = await seedManager.generateTransactionPairFingerprints(rating.ratingRef, pairIndex);
 
     // Standardisiere auf E24-Reihe (Privacy)
     const standardizedDifferenz = this.distributionEngine.privacyLayer.e24Rounding.standardizeAmount(
@@ -247,10 +238,6 @@ class RetroPayoutService {
       timestamp: Date.now(),
       pairIndex,
 
-      // Fingerprints
-      fingerprintCLtoSH: fingerprints.fingerprintCLtoSH,
-      fingerprintSHtoDS: fingerprints.fingerprintSHtoDS,
-
       // Token-Beträge
       sollTokens: sollTokens.toString(),
       istTokens: standardizedDifferenz.toString(),  // Nur die Differenz wird ausgezahlt
@@ -266,15 +253,6 @@ class RetroPayoutService {
     // Speichere Transaktion
     await this.saveTransaction(correctionTx);
 
-    // Füge zur Seed-Historie hinzu
-    await seedManager.addTransactionPair(
-      rating.ratingRef,
-      pairIndex,
-      fingerprints.fingerprintCLtoSH,  // CL→SH hash (wird erst nach Blockchain-Ausführung gesetzt)
-      fingerprints.fingerprintSHtoDS,  // SH→DS hash
-      'correction'
-    );
-
     // Queue für Blockchain-Ausführung (via PrivacyLayer)
     if (standardizedDifferenz > 0n) {
       const { address: _walletAddr, isNewWallet: _isNewWallet } =
@@ -285,8 +263,6 @@ class RetroPayoutService {
         domain: rating.domain,
         score: rating.score,
         tokens: standardizedDifferenz,
-        fingerprintCLtoSH: fingerprints.fingerprintCLtoSH,
-        fingerprintSHtoDS: fingerprints.fingerprintSHtoDS,
         ratingRef: rating.ratingRef,
         pairIndex,
         type: 'correction',
@@ -341,6 +317,106 @@ class RetroPayoutService {
   }
 
   /**
+   * Verarbeitet eine eingehende manuelle Korrektur vom Dashboard.
+   *
+   * Wird aus messaging-integration.js handleMessage('rating_correction') aufgerufen,
+   * nachdem rating-edit-ui.js submitCorrection() im Dashboard die Korrektur per
+   * E2E-Messaging an alle Devices der Gruppe gesendet hat.
+   *
+   * Das ist KEIN neues Rating — wir aktualisieren den existierenden Eintrag in
+   * rev_rating_history_30d und queuen anschließend den Delta-Mint. Im Gegensatz
+   * zum 6h-Timer wird die 3×-Schwelle übersprungen, weil eine manuelle Korrektur
+   * eine explizite User-Entscheidung ist und auch kleine Deltas ausgezahlt werden
+   * sollen (nur MIN_PAYOUT_TOKENS bleibt als Untergrenze).
+   *
+   * Idempotenz: Wenn das Rating lokal nicht existiert (z. B. anderes Device),
+   * wird die Nachricht ignoriert. Doppelt zugestellte Nachrichten erzeugen keine
+   * Duplikate, weil pairIndex aus existingTxs.length abgeleitet wird und der
+   * tatsächliche Mint im privacyLayer.queueTransaction über ratingRef+pairIndex
+   * dedupliziert ist.
+   *
+   * @param {Object} payload - { rating_ref, new_score, new_safety_factor, ... }
+   * @returns {Promise<Object>} { applied, payoutCreated, payoutTokens, reason? }
+   */
+  async processCorrection(payload) {
+    if (!payload || !payload.rating_ref) {
+      return { applied: false, payoutCreated: false, reason: 'invalid_payload' };
+    }
+
+    const ratingRef = payload.rating_ref;
+    const newScore = Number(payload.new_score);
+    if (!Number.isFinite(newScore) || newScore <= 0) {
+      return { applied: false, payoutCreated: false, reason: 'invalid_score' };
+    }
+
+    // 1. Finde und update das lokale Rating. Wenn es hier nicht existiert,
+    // gehört die Korrektur zu einem anderen Device — Nachricht ignorieren.
+    const updated = await this.tracker.updateRating(ratingRef, { score: newScore });
+    if (!updated) {
+      console.log('[RetroPayoutService] processCorrection: rating not found locally, ignoring', { ratingRef });
+      return { applied: false, payoutCreated: false, reason: 'rating_not_local' };
+    }
+
+    console.log('[RetroPayoutService] processCorrection: rating updated', {
+      ratingRef,
+      newScore,
+      domain: updated.domain
+    });
+
+    // 2. Berechne Soll-Tokens mit aktuellem Faktor
+    const storedTransactions = await this.getStoredTransactions();
+    const ratingTxs = storedTransactions.filter(tx => tx.ratingRef === ratingRef);
+    const currentFactor = await this.tracker.calculateCurrentFactor();
+    const userData = await this.distributionEngine.getUserData(this.storage);
+    const factorHistory = await this.tracker.getFactorHistory(90);
+    const prognosisSF = this.distributionEngine.prognosisModel.calculatePrognosisSF(factorHistory);
+
+    const sollTokens = await this.calculateSollTokens(updated, currentFactor, prognosisSF, userData);
+
+    // 3. Summe aller bisherigen Auszahlungen für dieses Rating
+    const istTokensSum = ratingTxs.reduce((sum, tx) => {
+      try { return sum + BigInt(tx.istTokens || '0'); } catch (_) { return sum; }
+    }, 0n);
+
+    const differenz = sollTokens - istTokensSum;
+
+    // 4. Manuelle Korrektur: 3×-Regel überspringen, nur MIN_PAYOUT_TOKENS
+    // als Untergrenze. Negative Differenz (= bereits zu viel ausgezahlt)
+    // erzeugt keine Rückforderung — die alte Auszahlung bleibt stehen.
+    if (differenz < this.MIN_PAYOUT_TOKENS) {
+      console.log('[RetroPayoutService] processCorrection: no payout needed', {
+        ratingRef,
+        sollTokens: sollTokens.toString(),
+        istTokensSum: istTokensSum.toString(),
+        differenz: differenz.toString()
+      });
+      return {
+        applied: true,
+        payoutCreated: false,
+        payoutTokens: '0',
+        reason: differenz < 0n ? 'already_overpaid' : 'below_min_payout'
+      };
+    }
+
+    // 5. Erstelle Korrektur-Transaktion (Delta-Mint)
+    await this.createCorrectionTransaction(
+      updated,
+      ratingTxs,
+      sollTokens,
+      istTokensSum,
+      differenz,
+      currentFactor,
+      prognosisSF
+    );
+
+    return {
+      applied: true,
+      payoutCreated: true,
+      payoutTokens: differenz.toString()
+    };
+  }
+
+  /**
    * Hole Stats über letzte Ausführung
    */
   async getStats() {
@@ -352,9 +428,4 @@ class RetroPayoutService {
       lastRunDate: this.lastRunTimestamp ? new Date(this.lastRunTimestamp).toISOString() : null
     };
   }
-}
-
-// Export für background.js
-if (typeof window !== 'undefined') {
-  window.RetroPayoutService = RetroPayoutService;
 }

@@ -13,7 +13,7 @@
  * WICHTIG: Additive und multiplikative Faktoren kombiniert
  */
 
-class InteractionScorer {
+export class InteractionScorer {
   constructor(config) {
     this.config = config;
   }
@@ -240,14 +240,4 @@ class InteractionScorer {
 
     return activeTime / totalTime;
   }
-}
-
-// Export für Browser-Extension (non-module)
-if (typeof window !== 'undefined') {
-  window.InteractionScorer = InteractionScorer;
-}
-
-// Export für Node.js/Tests
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = InteractionScorer;
 }

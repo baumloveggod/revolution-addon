@@ -6,16 +6,16 @@
  * WICHTIG:
  * - Wird erst nach 10 Tagen aktiviert
  * - Nimmt den UNTEREN Rand der Schwankungen an (pessimistisch)
- * - Kombiniert mit bestehenden SFs (Start-SF × Prognose-SF × Fluctuation-SF)
+ * - Kombiniert mit bestehenden SFs (Start-SF x Prognose-SF x Fluctuation-SF)
  *
  * Logik:
  * 1. Berechne Min/Max des Translation Factors über letzte 30 Tage
  * 2. Berechne Schwankungsbreite: (Max - Min) / Mean
- * 3. SF = 1.0 - (Schwankungsbreite × Konservativitäts-Faktor)
+ * 3. SF = 1.0 - (Schwankungsbreite x Konservativitäts-Faktor)
  * 4. Mindestens 0.5 (50%), Maximum 1.0 (100%)
  */
 
-class FluctuationSafetyFactor {
+export class FluctuationSafetyFactor {
   constructor(config = {}) {
     // Konfiguration
     this.ACTIVATION_DAY = config.activationDay || 10;  // Erst ab Tag 10
@@ -29,7 +29,7 @@ class FluctuationSafetyFactor {
    * Berechnet Fluctuation-SF basierend auf Translation Factor Historie
    *
    * @param {Array} factorHistory - [{timestamp, factor, totalScore}, ...]
-   * @param {number} daysSinceStart - Tage seit BA→CL Transfer
+   * @param {number} daysSinceStart - Tage seit BA->CL Transfer
    * @returns {number} Safety Factor (0.5 - 1.0)
    */
   calculateFluctuationSF(factorHistory, daysSinceStart) {
@@ -176,9 +176,4 @@ class FluctuationSafetyFactor {
       safetyFactor
     };
   }
-}
-
-// Export für background.js
-if (typeof window !== 'undefined') {
-  window.FluctuationSafetyFactor = FluctuationSafetyFactor;
 }

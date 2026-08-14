@@ -8,8 +8,6 @@ build/
 *.bundle.js
 
 # Firefox addon generated files
-firefox-addon/wallet-bundle/
-firefox-addon/wallet/wallet-bundle.js
 firefox-addon/config.js
 
 # Logs

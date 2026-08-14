@@ -141,6 +141,27 @@
         console.error('[contentScript] ❌ Failed to forward response to background.js:', err);
       });
     }
+
+    // Phase 3: Website → addon opt-in update for external signal providers.
+    // The website sends { type: 'PROVIDER_OPTIN_UPDATE', mode, providers }.
+    // We forward it verbatim to background.js, which persists it.
+    if (event.data && event.data.type === 'PROVIDER_OPTIN_UPDATE') {
+      browser.runtime.sendMessage(event.data)
+        .then(result => {
+          // Echo result back to the page so the UI can confirm persistence.
+          window.postMessage(
+            { type: 'PROVIDER_OPTIN_UPDATE_ACK', result },
+            window.location.origin
+          );
+        })
+        .catch(err => {
+          console.error('[contentScript] ❌ Failed to forward opt-in to background:', err);
+          window.postMessage(
+            { type: 'PROVIDER_OPTIN_UPDATE_ACK', result: { ok: false, error: err.message } },
+            window.location.origin
+          );
+        });
+    }
   });
 
   // Erste Synchronisation nach dem Laden

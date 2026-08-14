@@ -17,8 +17,8 @@
  * WICHTIG: Wallets werden NICHT vom Addon generiert!
  *
  * @param {Object} config
- * @param {string} [config.clApiUrl='https://192.168.178.130:4100'] - Write-server URL
- * @param {string} [config.clReadApiUrl='https://192.168.178.130:4101'] - Read-server URL
+ * @param {string} [config.clApiUrl='https://ledger.lenkenhoff.de'] - Write-server URL
+ * @param {string} [config.clReadApiUrl='https://read.lenkenhoff.de'] - Read-server URL
  * @param {Object} config.storage - Storage backend implementing browser.storage.local interface
  * @param {Function} [config.fetch] - Fetch function (defaults to globalThis.fetch).
  *                                    Pass window.fetchWithVersion in the Firefox addon.
@@ -27,9 +27,9 @@
 class WalletManager {
   constructor(config = {}) {
     // Write-server (mutations): port 4100
-    this.clApiUrl = config.clApiUrl || 'https://192.168.178.130:4100';
+    this.clApiUrl = config.clApiUrl || 'https://ledger.lenkenhoff.de';
     // Read-server (balance, transactions, health): port 4101
-    this.clReadApiUrl = config.clReadApiUrl || 'https://192.168.178.130:4101';
+    this.clReadApiUrl = config.clReadApiUrl || 'https://read.lenkenhoff.de';
 
     if (!config.storage) {
       throw new Error('[WalletManager] storage is required in config');

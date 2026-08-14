@@ -9,7 +9,7 @@
  *       höhere Auszahlungen bei stabilen Trends.
  */
 
-class PrognosisSafetyFactor {
+export class PrognosisSafetyFactor {
   constructor(config = {}) {
     // Algorithmus-Parameter (können kalibriert werden)
     this.EWMA_ALPHA = config.ewmaAlpha || 0.3; // Gewichtung neuerer Werte
@@ -32,10 +32,6 @@ class PrognosisSafetyFactor {
   calculatePrognosisSF(factorHistory) {
     // Validierung: Genug Datenpunkte?
     if (!factorHistory || factorHistory.length < this.MIN_DATA_POINTS) {
-      console.warn('[PrognosisSF] Nicht genug Daten für Prognose:', {
-        dataPoints: factorHistory?.length || 0,
-        required: this.MIN_DATA_POINTS
-      });
       return 0.5; // Sehr konservativ (50% Auszahlung)
     }
 
@@ -57,21 +53,20 @@ class PrognosisSafetyFactor {
     // 5. Sicherheits-Faktor basierend auf Unsicherheit
     let safetyFactor = 1.0;
 
-    // Regel 1: Hohe Varianz → höherer Puffer
+    // Regel 1: Hohe Varianz -> höherer Puffer
     const varianceRatio = stats.stdDev / stats.mean;
     if (varianceRatio > this.VARIANCE_THRESHOLD) {
       const variancePenalty = Math.min(0.2, varianceRatio - this.VARIANCE_THRESHOLD);
       safetyFactor *= (1.0 - variancePenalty);
-
     }
 
-    // Regel 2: Fallender Trend → höherer Puffer
+    // Regel 2: Fallender Trend -> höherer Puffer
     if (trend < this.TREND_THRESHOLD) {
       const trendPenalty = Math.min(0.1, Math.abs(trend) - Math.abs(this.TREND_THRESHOLD));
       safetyFactor *= (1.0 - trendPenalty);
     }
 
-    // Regel 3: Sehr geringe Datenmenge → konservativer
+    // Regel 3: Sehr geringe Datenmenge -> konservativer
     if (factorHistory.length < this.MIN_DATA_POINTS * 2) {
       const dataPenalty = 0.05 * (1 - (factorHistory.length / (this.MIN_DATA_POINTS * 2)));
       safetyFactor *= (1.0 - dataPenalty);
@@ -222,14 +217,4 @@ class PrognosisSafetyFactor {
 
     return Math.round(confidence);
   }
-}
-
-// Export für Browser-Extension (non-module)
-if (typeof window !== 'undefined') {
-  window.PrognosisSafetyFactor = PrognosisSafetyFactor;
-}
-
-// Export für Node.js/Tests
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = PrognosisSafetyFactor;
 }

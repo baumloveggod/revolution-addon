@@ -11,7 +11,7 @@
  * Output: Baseline-Ratio für Phase 2
  */
 
-class CalibrationManager {
+export class CalibrationManager {
   constructor(config, prognosisModel) {
     this.config = config;
     this.prognosisModel = prognosisModel;
@@ -61,7 +61,7 @@ class CalibrationManager {
    *
    * Berechnet:
    * 1. Totale Scores über alle 30 Tage
-   * 2. Perfekte Normalisierung (Σ Budget = 10€)
+   * 2. Perfekte Normalisierung (Summe Budget = 10 EUR)
    * 3. Baseline-Ratio für Phase 2
    * 4. Bulk-Auszahlungen pro Domain
    *
@@ -162,8 +162,11 @@ class CalibrationManager {
 
   /**
    * Speichert Kalibrations-Ergebnis lokal
+   *
+   * @param {Object} result - Kalibrations-Ergebnis
+   * @param {Object} storage - Storage adapter
    */
-  async saveCalibrationResult(result, storage = browser.storage.local) {
+  async saveCalibrationResult(result, storage) {
     await storage.set({
       'rev_calibration_result': result,
       'rev_calibration_completed': true,
@@ -173,8 +176,10 @@ class CalibrationManager {
 
   /**
    * Lädt Kalibrations-Ergebnis
+   *
+   * @param {Object} storage - Storage adapter
    */
-  async loadCalibrationResult(storage = browser.storage.local) {
+  async loadCalibrationResult(storage) {
     const data = await storage.get([
       'rev_calibration_result',
       'rev_calibration_completed',
@@ -243,14 +248,4 @@ class CalibrationManager {
       orPayments: [] // Leer für jetzt
     };
   }
-}
-
-// Export für Browser-Extension (non-module)
-if (typeof window !== 'undefined') {
-  window.CalibrationManager = CalibrationManager;
-}
-
-// Export für Node.js/Tests
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = CalibrationManager;
 }

@@ -8,8 +8,17 @@
  * Bedingung: Abweichung > 5% zwischen Soll und Ist
  */
 
-class TransactionCorrector {
-  constructor(distributionEngine, translationFactorTracker, messagingClient, storage = browser.storage.local) {
+export class TransactionCorrector {
+  /**
+   * @param {Object} distributionEngine - DistributionEngine instance
+   * @param {Object} translationFactorTracker - TranslationFactorTracker instance
+   * @param {Object} messagingClient - MessagingClient instance
+   * @param {Object} storage - Storage adapter (required, no default)
+   */
+  constructor(distributionEngine, translationFactorTracker, messagingClient, storage) {
+    if (!storage) {
+      throw new Error('TransactionCorrector requires a storage adapter');
+    }
     this.distributionEngine = distributionEngine;
     this.tracker = translationFactorTracker;
     this.messagingClient = messagingClient;
@@ -215,14 +224,4 @@ class TransactionCorrector {
         : '0'
     };
   }
-}
-
-// Export für Browser-Extension (non-module)
-if (typeof window !== 'undefined') {
-  window.TransactionCorrector = TransactionCorrector;
-}
-
-// Export für Node.js/Tests
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = TransactionCorrector;
 }

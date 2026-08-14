@@ -21,7 +21,7 @@
  * - Unabhängig von anderen Faktoren
  */
 
-class DampingSafetyFactor {
+export class DampingSafetyFactor {
   constructor(config = {}) {
     // Konfiguration
     this.RAMP_UP_DAYS = config.rampUpDays || 30;  // Volle Dämpfung nach 30 Tagen
@@ -32,7 +32,7 @@ class DampingSafetyFactor {
   /**
    * Berechnet Dämpfungs-SF basierend auf verstrichenen Tagen
    *
-   * @param {number} daysSinceFirstTransfer - Tage seit BA→CL Transfer
+   * @param {number} daysSinceFirstTransfer - Tage seit BA->CL Transfer
    * @returns {number} Damping Safety Factor (0.0 - 1.0)
    */
   calculateDampingSF(daysSinceFirstTransfer) {
@@ -124,9 +124,4 @@ class DampingSafetyFactor {
   static exampleCalculation() {
     // Example calculations for testing/debugging - no output
   }
-}
-
-// Export für background.js
-if (typeof window !== 'undefined') {
-  window.DampingSafetyFactor = DampingSafetyFactor;
 }

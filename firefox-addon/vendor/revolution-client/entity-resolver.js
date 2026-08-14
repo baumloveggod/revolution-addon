@@ -5,9 +5,14 @@
  * um Wallet-Adressen für Domains zu holen
  */
 
-class EntityResolver {
-  constructor(serverApiUrl = 'https://entity.lenkenhoff.de') {
+export class EntityResolver {
+  /**
+   * @param {string} [serverApiUrl='https://entity.lenkenhoff.de'] - API base URL
+   * @param {Function} [fetchFn=globalThis.fetch] - fetch implementation for DI
+   */
+  constructor(serverApiUrl = 'https://entity.lenkenhoff.de', fetchFn = globalThis.fetch.bind(globalThis)) {
     this.serverApiUrl = serverApiUrl;
+    this.fetch = fetchFn;
   }
 
   /**
@@ -29,7 +34,7 @@ class EntityResolver {
     try {
       const url = `${this.serverApiUrl}/entity/resolve?domain=${encodeURIComponent(domain)}`;
 
-      const response = await fetch(url, {
+      const response = await this.fetch(url, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${userToken}`,
@@ -39,7 +44,7 @@ class EntityResolver {
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-        console.error('[EntityResolver] ❌ API returned error:', {
+        console.error('[EntityResolver] API returned error:', {
           status: response.status,
           statusText: response.statusText,
           error: error,
@@ -53,7 +58,7 @@ class EntityResolver {
 
       return data;
     } catch (error) {
-      console.error('[EntityResolver] ❌ Failed to resolve entity:', error.message);
+      console.error('[EntityResolver] Failed to resolve entity:', error.message);
       throw error;
     }
   }
@@ -63,10 +68,10 @@ class EntityResolver {
    *
    * @param {string} domain - Die Domain
    * @param {string} userToken - User-Token
-   * @param {Object} storage - Browser storage (default: browser.storage.local)
+   * @param {Object} storage - Storage adapter with get/set methods
    * @returns {Promise<string>} Wallet-Adresse (Flow-tagged: DS::0x... or OR::0x...)
    */
-  async getAndCacheWalletAddress(domain, userToken, storage = browser.storage.local) {
+  async getAndCacheWalletAddress(domain, userToken, storage) {
     // Prüfe ob bereits gecacht
     const data = await storage.get(['rev_domain_wallets', 'rev_new_wallets']);
     const domainWallets = data.rev_domain_wallets || {};
@@ -80,7 +85,7 @@ class EntityResolver {
     const entity = await this.resolveEntity(domain, userToken);
 
     if (!entity.wallet_flow_address) {
-      console.error('[EntityResolver] ❌ No wallet_flow_address in response:', {
+      console.error('[EntityResolver] No wallet_flow_address in response:', {
         domain: domain,
         responseKeys: Object.keys(entity),
         entity: entity
@@ -118,10 +123,10 @@ class EntityResolver {
   /**
    * Lädt alle gecachten Wallet-Adressen
    *
-   * @param {Object} storage - Browser storage
-   * @returns {Promise<Object>} Domain → Wallet Mapping
+   * @param {Object} storage - Storage adapter
+   * @returns {Promise<Object>} Domain -> Wallet Mapping
    */
-  async getCachedWallets(storage = browser.storage.local) {
+  async getCachedWallets(storage) {
     const data = await storage.get(['rev_domain_wallets']);
     return data.rev_domain_wallets || {};
   }
@@ -130,9 +135,9 @@ class EntityResolver {
    * Löscht Cache für eine Domain
    *
    * @param {string} domain - Die Domain
-   * @param {Object} storage - Browser storage
+   * @param {Object} storage - Storage adapter
    */
-  async clearCacheForDomain(domain, storage = browser.storage.local) {
+  async clearCacheForDomain(domain, storage) {
     const data = await storage.get(['rev_domain_wallets']);
     const domainWallets = data.rev_domain_wallets || {};
 
@@ -144,19 +149,9 @@ class EntityResolver {
   /**
    * Löscht gesamten Wallet-Cache
    *
-   * @param {Object} storage - Browser storage
+   * @param {Object} storage - Storage adapter
    */
-  async clearAllCache(storage = browser.storage.local) {
+  async clearAllCache(storage) {
     await storage.set({ rev_domain_wallets: {} });
   }
-}
-
-// Export für Browser-Extension (non-module)
-if (typeof window !== 'undefined') {
-  window.EntityResolver = EntityResolver;
-}
-
-// Export für Node.js/Tests
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = EntityResolver;
 }

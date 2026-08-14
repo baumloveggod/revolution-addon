@@ -17,13 +17,15 @@
  * 5. Projektion auf Monatsende
  */
 
-class PrognosisModel {
-  constructor(config) {
+export class PrognosisModel {
+  /**
+   * @param {Object} config - Scoring config
+   * @param {Object} [prognosisSF=null] - PrognosisSafetyFactor instance (optional, injected)
+   */
+  constructor(config, prognosisSF = null) {
     this.config = config;
     // NEU: Prognose-Sicherheits-Faktor (für Translation Factor Schwankungen)
-    this.prognosisSF = typeof window !== 'undefined' && window.PrognosisSafetyFactor
-      ? new window.PrognosisSafetyFactor()
-      : null;
+    this.prognosisSF = prognosisSF;
   }
 
   /**
@@ -166,7 +168,7 @@ class PrognosisModel {
    * Berechnet linearen Trend (Steigung)
    * Nutzt letzte 4 Wochen
    *
-   * Formel: slope = Σ((x - x̄)(y - ȳ)) / Σ((x - x̄)²)
+   * Formel: slope = Summe((x - xMean)(y - yMean)) / Summe((x - xMean)^2)
    * Returns: Trend-Faktor (-1.0 bis +1.0+)
    */
   calculateLinearTrend(weeklyScores) {
@@ -245,7 +247,7 @@ class PrognosisModel {
 
   /**
    * Berechnet Token-Ratio (Tokens pro Score-Punkt)
-   * Budget: 10€ = 10^16 Tokens
+   * Budget: 10 EUR = 10^16 Tokens
    *
    * WICHTIG: Nutzt BigInt für Präzision!
    */
@@ -267,7 +269,7 @@ class PrognosisModel {
 
   /**
    * Konservativitätsfaktor
-   * Linear: Tag 0 → 0%, Tag 90 → 98%
+   * Linear: Tag 0 -> 0%, Tag 90 -> 98%
    *
    * WICHTIG: Keine Auszahlung ohne Prognose-Grundlage!
    */
@@ -302,10 +304,10 @@ class PrognosisModel {
 
     // Multipliziere Ratio mit Konservativitätsfaktor
     // WICHTIG: BigInt Arithmetik!
-    const conservativeFactor = Math.floor(conservativityFactor * 1000); // 0.98 → 980
+    const conservativeFactor = Math.floor(conservativityFactor * 1000); // 0.98 -> 980
     const conservativeRatio = (baseRatio * BigInt(conservativeFactor)) / 1000n;
 
-    // Token-Menge = Score × Ratio
+    // Token-Menge = Score x Ratio
     const scoreBigInt = BigInt(Math.floor(newSessionScore));
     const tokens = scoreBigInt * conservativeRatio;
 
@@ -391,14 +393,4 @@ class PrognosisModel {
 
     return nextDay;
   }
-}
-
-// Export für Browser-Extension (non-module)
-if (typeof window !== 'undefined') {
-  window.PrognosisModel = PrognosisModel;
-}
-
-// Export für Node.js/Tests
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = PrognosisModel;
 }

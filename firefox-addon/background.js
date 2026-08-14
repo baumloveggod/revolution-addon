@@ -1,5 +1,895 @@
 // Tracking-Modul wird automatisch durch manifest.json geladen
 
+// ===== DSL SCORING INFRASTRUCTURE =====
+//
+// Two services:
+//   - crowd.lenkenhoff.de  → recursive /dsl/<kind>/<key> discovery (canonical)
+//   - entity.lenkenhoff.de → name → DS-wallet resolution (+ legacy /signals/expression proxy)
+//
+// On every tab navigation we walk /dsl/domain/<host> → /dsl/domain/<host>/<path> → ...
+// The server is stateless across resources; the client decides whether a child
+// is relevant based on the runtime context (current tab URL, installed addons,
+// browser events, ...).
+
+const DEVICE_ID                = 'revolution-firefox-addon';
+const DSL_CROWD_SERVICE_URL    = 'https://crowd.lenkenhoff.de';
+const DSL_ENTITY_SERVICE_URL   = 'https://entity.lenkenhoff.de'; // legacy /signals/expression proxy
+const ENTITY_SERVICE_URL       = 'https://entity.lenkenhoff.de'; // pure name → wallet resolver
+const DSL_CACHE_TTL            = 3600000;        // 1 h per resource
+const DSL_DEVICE_CACHE_TTL     = 24 * 3600000;   // 24 h for the device bootstrap
+const DSL_PENDING_TTL_DEFAULT  = 120 * 1000;     // fallback Retry-After
+const DSL_MAX_RECURSION_DEPTH  = 4;
+const DSL_EVENT_BUFFER_MAX     = 1000; // hard cap to prevent runaway buffers
+
+// Per-resource cache: `${kind}:${key}` → { data | null, expiresAt }
+const dslResourceCache = new Map();
+// Legacy domain-only cache (kept for the fetchDSLExpression fallback below)
+const dslExpressionCache = new Map();
+// Permanent beneficiary alias → wallet cache (in-memory; storage.local mirrors it)
+const entityWalletCache = new Map();
+// Device DSL bootstrap (loaded once at addon start, refreshed every 24h)
+let deviceDSL = null;
+// tabId → { expression, crowdWeights, events: [{ signalId, count, resolvedRefs?, pageUrl }], outlinkPassthrough, host }
+const dslSignalStore = new Map();
+
+// tabId → { marker, sourceDomain, sourceUrl, capturedAt, atCapacity }
+// Captured by tabs.onUpdated when an outlink_passthrough-armed tab navigates
+// to a different host. Consumed by handleSessionCompleted (which knows the
+// distributor's ratingRef once processSession finishes) to enqueue the
+// deferred passthrough. In-memory only — never persisted; if the addon
+// restarts mid-flight the hop is forgotten and the distributor is not paid
+// for that session, which is the safer failure mode.
+const pendingOutlinkHops = new Map();
+
+/**
+ * Fetch any DSL resource by (kind, key). Handles 200/202/404 + caching.
+ *  - 200: parsed envelope cached for 1 h (24 h for device)
+ *  - 202: cached as null until Retry-After elapses (so we don't hammer the
+ *         miss-trigger pipeline while n8n is still working)
+ *  - 404: cached as null for 1 h
+ *  - network/5xx: not cached (so transient errors recover instantly)
+ */
+async function getDSLResource(kind, key) {
+  const cacheKey = `${kind}:${key}`;
+  const now = Date.now();
+  const hit = dslResourceCache.get(cacheKey);
+  if (hit && hit.expiresAt > now) return hit.data;
+
+  // The express :key(*) wildcard handles slashes — leave them unencoded
+  // so /dsl/domain/www.youtube.com/watch parses correctly server-side.
+  const url = `${DSL_CROWD_SERVICE_URL}/dsl/${encodeURIComponent(kind)}/${key}`;
+  try {
+    const resp = await fetch(url);
+    if (resp.status === 202) {
+      const retryAfter = parseInt(resp.headers.get('Retry-After') || '', 10);
+      const ttl = Number.isFinite(retryAfter) ? retryAfter * 1000 : DSL_PENDING_TTL_DEFAULT;
+      dslResourceCache.set(cacheKey, { data: null, expiresAt: now + ttl });
+      return null;
+    }
+    if (resp.status === 404) {
+      dslResourceCache.set(cacheKey, { data: null, expiresAt: now + DSL_CACHE_TTL });
+      return null;
+    }
+    if (!resp.ok) throw new Error(`status ${resp.status}`);
+    const data = await resp.json();
+    const ttl = (kind === 'device') ? DSL_DEVICE_CACHE_TTL : DSL_CACHE_TTL;
+    dslResourceCache.set(cacheKey, { data, expiresAt: now + ttl });
+    return data;
+  } catch (err) {
+    console.warn(`[DSL] fetch ${cacheKey} failed:`, err.message);
+    return null;
+  }
+}
+
+/**
+ * Load (or refresh) the device-level DSL bootstrap. Persisted in
+ * storage.local so we survive addon restarts without a network round-trip.
+ * Stale-while-error: if the network call fails we keep the previous cached
+ * blob rather than going dark.
+ */
+async function loadDeviceDSL() {
+  try {
+    const stored = await browser.storage.local.get('dsl:device');
+    const cached = stored['dsl:device'];
+    if (cached && Date.now() - cached.fetchedAt < DSL_DEVICE_CACHE_TTL) {
+      deviceDSL = cached.data;
+      return deviceDSL;
+    }
+    const fresh = await getDSLResource('device', DEVICE_ID);
+    if (fresh) {
+      deviceDSL = fresh;
+      await browser.storage.local.set({ 'dsl:device': { data: fresh, fetchedAt: Date.now() } });
+    } else if (cached) {
+      deviceDSL = cached.data; // stale-while-error
+    }
+    return deviceDSL;
+  } catch (err) {
+    console.warn('[DSL] loadDeviceDSL failed:', err.message);
+    return deviceDSL;
+  }
+}
+
+/**
+ * Decide whether a child resource reference is relevant for the current
+ * runtime context. The server returns ALL children — the client picks
+ * which to follow based on what it actually knows right now.
+ */
+function childMatchesContext(child, _tab, tabUrl) {
+  if (!child || typeof child.kind !== 'string' || typeof child.key !== 'string') return false;
+  switch (child.kind) {
+    case 'domain': {
+      // Special wildcard from device bootstrap: "you may probe any domain"
+      if (child.key === '__any__') return true;
+      // Otherwise the child key is "host" or "host/path" — must match the
+      // current tab's URL prefix.
+      if (!child.key.startsWith(tabUrl.host)) return false;
+      const afterHost = child.key.slice(tabUrl.host.length);
+      if (afterHost === '' || afterHost === '/') return true;
+      return tabUrl.pathname.startsWith(afterHost);
+    }
+    case 'addon':
+      // Firefox-addon only knows itself in this code path. The bootstrap's
+      // __any__ wildcard is consumed at startup, not on tab navigation.
+      return false;
+    case 'browser-event':
+      return false;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Walk the DSL hierarchy. The device-level DSL is the root match — it
+ * carries the baseline `page_visit` signal plus the per-device
+ * beneficiarySlots (browser/os/addon_author/website) that every page
+ * inherits. The domain walk starting from /dsl/domain/<host> appends
+ * narrower matches on top.
+ *
+ * Returns all applicable `match` blocks (root → narrowest).
+ */
+async function walkDSLForTab(tab) {
+  const results = [];
+  const visited = new Set();
+  let tabUrl;
+  try {
+    tabUrl = new URL(tab.url);
+  } catch {
+    return results;
+  }
+
+  // Root match: device-level DSL. Without this, page_visit (which only
+  // lives in device-slots.json) never fires and every session is
+  // discarded by RevolutionScoring as "No DSL score".
+  if (!deviceDSL) await loadDeviceDSL();
+  if (deviceDSL?.match) {
+    results.push(deviceDSL.match);
+    visited.add(`device:${DEVICE_ID}`);
+  }
+
+  async function visit(kind, key, depth) {
+    const cacheKey = `${kind}:${key}`;
+    if (depth > DSL_MAX_RECURSION_DEPTH || visited.has(cacheKey)) return;
+    visited.add(cacheKey);
+
+    const resp = await getDSLResource(kind, key);
+    if (!resp) return;
+    if (resp.match) results.push(resp.match);
+
+    for (const child of (resp.children || [])) {
+      if (!childMatchesContext(child, tab, tabUrl)) continue;
+      await visit(child.kind, child.key, depth + 1);
+    }
+  }
+
+  await visit('domain', tabUrl.host, 0);
+  return results;
+}
+
+/**
+ * Pick the first `outlink_passthrough` signal out of a combined expression.
+ *
+ * Returns a small marker object the tab handler stores alongside the rest
+ * of the DSL match, or null if the distributor mechanism is not opted into.
+ *
+ * The marker is intentionally minimal — it carries the unresolved
+ * `weightSpec` (the original `{ crowdScope, fallback }` object) so the
+ * release path can resolve the share against fresh crowdWeights at the
+ * moment a downstream rating finalizes, not at tab-open time.
+ *
+ * Detection only — no enqueue, no behavior change. Step 1 of the
+ * outlink-passthrough plan (see plans/clever-purring-kitten.md).
+ */
+function extractOutlinkPassthroughSignal(combined) {
+  const sigs = combined && Array.isArray(combined.signals) ? combined.signals : null;
+  if (!sigs) return null;
+  for (const sig of sigs) {
+    if (sig?.type !== 'outlink_passthrough') continue;
+    return {
+      signalId: sig.id || null,
+      weightSpec: sig.weight || null,
+      recipients: Array.isArray(sig.recipients) ? sig.recipients : [],
+      ttlMs: (sig.extract && typeof sig.extract.ttlMs === 'number')
+        ? sig.extract.ttlMs
+        : 1800000, // 30 min default
+      display: sig.display || null,
+    };
+  }
+  return null;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Outlink-Passthrough Defer Queue
+//
+// Distributor sites (HN, Google, ...) declare an `outlink_passthrough` signal
+// in their DSL. When the user leaves such a site via an outlink, we DON'T
+// send a rating to the distributor immediately — we enqueue a deferred entry
+// here. Once the user finishes the next page (the "anchor"), we cascade-walk
+// the chain backwards: each distributor's score is `share * nextScore`,
+// resolved against fresh crowdWeights at release time.
+//
+// Storage: browser.storage.local under PENDING_OUTLINK_CHAINS_KEY.
+// Bounds: chains are capped at OUTLINK_MAX_CHAIN_DEPTH hops; longer paths
+// trigger a forced-anchor resolution (handled by the enqueue hook later).
+//
+// This block defines pure helpers only — no callers wired up yet.
+// See plans/clever-purring-kitten.md for the full design.
+// ────────────────────────────────────────────────────────────────────────────
+
+const PENDING_OUTLINK_CHAINS_KEY = 'pendingOutlinkChains';
+const OUTLINK_MAX_CHAIN_DEPTH = 3;
+
+async function loadOutlinkChains() {
+  try {
+    const stored = await browser.storage.local.get(PENDING_OUTLINK_CHAINS_KEY);
+    const arr = stored?.[PENDING_OUTLINK_CHAINS_KEY];
+    return Array.isArray(arr) ? arr : [];
+  } catch (err) {
+    console.warn('[outlink-passthrough] loadOutlinkChains failed:', err.message);
+    return [];
+  }
+}
+
+async function saveOutlinkChains(chains) {
+  try {
+    await browser.storage.local.set({ [PENDING_OUTLINK_CHAINS_KEY]: chains });
+  } catch (err) {
+    console.warn('[outlink-passthrough] saveOutlinkChains failed:', err.message);
+  }
+}
+
+/**
+ * Resolve a `weight: { crowdScope, fallback }` spec to a numeric share.
+ * Mirrors DSLRecipientAggregator.resolveWeight in dsl-scoring-engine.js so
+ * the cascade-walk computes the same fraction the rest of the system uses.
+ */
+function resolvePassthroughShare(weightSpec, crowdWeights) {
+  if (!weightSpec) return 0;
+  const dist = weightSpec.crowdScope && crowdWeights
+    ? crowdWeights[weightSpec.crowdScope]
+    : null;
+  if (dist && typeof dist.autoValue === 'number' && dist.hitlScore !== 'CRITICAL') {
+    return dist.autoValue;
+  }
+  return typeof weightSpec.fallback === 'number' ? weightSpec.fallback : 0;
+}
+
+/**
+ * Find the currently-open chain entries for a tab, sorted by chainIndex asc.
+ * A "chain" is the set of entries sharing the same chainId; here we look up
+ * by tabId because at most one chain is open per tab at a time.
+ */
+function findOpenChainForTab(chains, tabId) {
+  const tabEntries = chains.filter(c => c.sourceTabId === tabId);
+  if (tabEntries.length === 0) return null;
+  // All entries in a tab share the same chainId by construction.
+  const chainId = tabEntries[0].chainId;
+  return tabEntries
+    .filter(c => c.chainId === chainId)
+    .sort((a, b) => a.chainIndex - b.chainIndex);
+}
+
+/**
+ * Append a new hop to the open chain in this tab, or start a new chain.
+ *
+ * @param {number} tabId
+ * @param {string} sourceDomain - the distributor we're leaving
+ * @param {Object} marker - dslSignalStore[tabId].outlinkPassthrough
+ * @param {string} ratingRef - existing ratingRef of the distributor session
+ * @param {Object} sessionContext - minimal session info needed for delivery
+ * @returns {Promise<{chainId, chainIndex, atCapacity: boolean}>}
+ *   `atCapacity` = true means this hop would have been the (depth+1)-th and
+ *   was NOT enqueued — caller must trigger forced-anchor resolution.
+ */
+async function enqueuePassthrough(tabId, sourceDomain, marker, ratingRef, sessionContext) {
+  const chains = await loadOutlinkChains();
+  const open = findOpenChainForTab(chains, tabId);
+  const now = Date.now();
+
+  let chainId;
+  let chainIndex;
+  if (open && open.length > 0) {
+    if (open.length >= OUTLINK_MAX_CHAIN_DEPTH) {
+      // Caller must force-anchor and resolve; do not enqueue further.
+      return { chainId: open[0].chainId, chainIndex: open.length, atCapacity: true };
+    }
+    chainId = open[0].chainId;
+    chainIndex = open[open.length - 1].chainIndex + 1;
+  } else {
+    chainId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `chain-${now}-${Math.random().toString(36).slice(2, 10)}`;
+    chainIndex = 0;
+  }
+
+  const entry = {
+    chainId,
+    chainIndex,
+    sourceDomain,
+    sourceTabId: tabId,
+    signal: {
+      signalId: marker.signalId,
+      weightSpec: marker.weightSpec,
+      recipients: marker.recipients,
+    },
+    ratingRef,
+    sessionContext: sessionContext || null,
+    createdAt: now,
+    expiresAt: now + (marker.ttlMs || 1800000),
+  };
+
+  chains.push(entry);
+  await saveOutlinkChains(chains);
+  return { chainId, chainIndex, atCapacity: false };
+}
+
+/**
+ * Drop expired chain entries. If any entry in a chain is expired, the WHOLE
+ * chain is dropped — once a hop's evidence-window has lapsed we can't honour
+ * the cascade contract any more.
+ */
+async function purgeExpiredPassthroughs() {
+  const chains = await loadOutlinkChains();
+  if (chains.length === 0) return;
+  const now = Date.now();
+
+  const expiredChainIds = new Set();
+  for (const c of chains) {
+    if (c.expiresAt <= now) expiredChainIds.add(c.chainId);
+  }
+  if (expiredChainIds.size === 0) return;
+
+  const survivors = chains.filter(c => !expiredChainIds.has(c.chainId));
+  await saveOutlinkChains(survivors);
+  console.log('[outlink-passthrough] purged', chains.length - survivors.length,
+    'expired entries across', expiredChainIds.size, 'chains');
+}
+
+/**
+ * Cascade-resolve a chain against an anchor score.
+ *
+ * Walks chain[anchorIndex-1] → chain[0], computing each link's resolved
+ * score as `share * nextResolvedScore`. Returns an array of payout-ready
+ * descriptors the caller will hand to sendRatingMessageToWebsite. The chain
+ * is removed from storage on success.
+ *
+ * Pure: does NOT send anything itself. Caller wires delivery in step 4.
+ *
+ * @param {string} chainId
+ * @param {number} anchorScore - finalized score of the page that closed the chain
+ * @param {Object} crowdWeights - fresh crowdWeights at release time
+ * @returns {Promise<Array<{sourceDomain, score, recipients, ratingRef, sessionContext, signalId}>>}
+ *   Order: oldest → youngest (chain[0] first), so callers can deliver in
+ *   any order they like.
+ */
+async function resolveChain(chainId, anchorScore, crowdWeights) {
+  const chains = await loadOutlinkChains();
+  const linksAsc = chains
+    .filter(c => c.chainId === chainId)
+    .sort((a, b) => a.chainIndex - b.chainIndex);
+  if (linksAsc.length === 0) return [];
+
+  // Walk youngest → oldest, accumulating share * nextScore.
+  const releases = [];
+  let nextScore = anchorScore;
+  for (let i = linksAsc.length - 1; i >= 0; i--) {
+    const link = linksAsc[i];
+    const share = resolvePassthroughShare(link.signal.weightSpec, crowdWeights);
+    const score = share * nextScore;
+    releases.unshift({
+      sourceDomain: link.sourceDomain,
+      score,
+      recipients: link.signal.recipients,
+      ratingRef: link.ratingRef,
+      sessionContext: link.sessionContext,
+      signalId: link.signal.signalId,
+      chainIndex: link.chainIndex,
+    });
+    nextScore = score;
+  }
+
+  // Remove the resolved chain from storage.
+  const survivors = chains.filter(c => c.chainId !== chainId);
+  await saveOutlinkChains(survivors);
+
+  return releases;
+}
+
+/**
+ * Combine multiple match blocks (root + narrower) into a single expression
+ * the content-script evaluator can consume. Narrower wins on conflict.
+ *  - signals[]:           merged by signal.id, later (narrower) wins
+ *  - crowdWeights[scope]: shallow merge, later wins
+ *  - beneficiarySlots[]:  deduplicated by `kind`
+ */
+function combineExpressions(matches) {
+  const signalsById = new Map();
+  const crowdWeights = {};
+  const slotsByKind = new Map();
+
+  for (const m of matches) {
+    if (Array.isArray(m.signals)) {
+      for (const sig of m.signals) {
+        if (sig?.id) signalsById.set(sig.id, sig);
+      }
+    }
+    if (m.crowdWeights && typeof m.crowdWeights === 'object') {
+      Object.assign(crowdWeights, m.crowdWeights);
+    }
+    if (Array.isArray(m.beneficiarySlots)) {
+      for (const slot of m.beneficiarySlots) {
+        if (slot?.kind) slotsByKind.set(slot.kind, slot);
+      }
+    }
+  }
+
+  return {
+    signals: Array.from(signalsById.values()),
+    crowdWeights,
+    beneficiarySlots: Array.from(slotsByKind.values()),
+  };
+}
+
+/**
+ * Resolve a beneficiary alias (e.g. "browser:firefox", "www.youtube.com",
+ * "addon:revolution") to its DS-wallet flow address via entity-service.
+ * Permanent cache — DS wallets are stable resources, never change once
+ * created.
+ */
+async function resolveBeneficiaryToWallet(alias) {
+  if (!alias) return null;
+  if (entityWalletCache.has(alias)) return entityWalletCache.get(alias);
+  const storageKey = `wallet:${alias}`;
+  try {
+    const stored = await browser.storage.local.get(storageKey);
+    if (stored[storageKey]) {
+      entityWalletCache.set(alias, stored[storageKey]);
+      return stored[storageKey];
+    }
+  } catch { /* ignore */ }
+  try {
+    const resp = await fetch(`${ENTITY_SERVICE_URL}/entity/resolve?name=${encodeURIComponent(alias)}`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const wallet = data.wallet_flow_address || (data.wallet_address ? `DS::${data.wallet_address}` : null);
+    if (wallet) {
+      entityWalletCache.set(alias, wallet);
+      try { await browser.storage.local.set({ [storageKey]: wallet }); } catch { /* ignore */ }
+    }
+    return wallet;
+  } catch (err) {
+    console.warn('[Entity] resolve failed:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Fetch DSL expression for a domain from entity service.
+ * Returns null if no expression exists for the domain.
+ */
+async function fetchDSLExpression(domain, urlPath) {
+  try {
+    const params = new URLSearchParams({ domain });
+    if (urlPath) params.set('path', urlPath);
+
+    const response = await fetch(`${DSL_ENTITY_SERVICE_URL}/signals/expression?${params}`);
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      console.warn('[DSL] Failed to fetch expression:', response.status);
+      return null;
+    }
+    return await response.json();
+  } catch (error) {
+    console.warn('[DSL] Expression fetch error:', error.message);
+    return null;
+  }
+}
+
+/**
+ * Get DSL expression with caching.
+ */
+async function getDSLExpression(domain, urlPath) {
+  const cacheKey = domain;
+  const cached = dslExpressionCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < DSL_CACHE_TTL) {
+    return cached.expression;
+  }
+
+  const expression = await fetchDSLExpression(domain, urlPath);
+  dslExpressionCache.set(cacheKey, { expression, fetchedAt: Date.now() });
+  return expression;
+}
+
+/**
+ * Inject DSL evaluator into a tab and send the expression.
+ */
+async function injectDSLEvaluator(tabId, expression, host) {
+  try {
+    await browser.tabs.executeScript(tabId, {
+      file: 'content-scripts/dsl-signal-evaluator.js',
+      runAt: 'document_idle'
+    });
+
+    await browser.tabs.sendMessage(tabId, {
+      type: 'DSL_LOAD_EXPRESSION',
+      expression: expression,
+    });
+
+    console.log('[DSL] Evaluator injected for', host || '(unknown host)');
+  } catch (error) {
+    console.warn('[DSL] Failed to inject evaluator:', error.message);
+  }
+}
+
+/**
+ * Handle a single DSL signal event from the content-script evaluator.
+ *
+ * v2 is event-based: each false→true transition / click is appended to a
+ * per-tab buffer. At session end the buffer feeds into
+ * `aggregateDSLDistribution()`, which produces the recipient list that
+ * becomes `Rating.distribution.beneficiaries[]`.
+ */
+function handleDSLSignalEvent(message, sender) {
+  const tabId = sender?.tab?.id;
+  if (!tabId) return;
+
+  const store = dslSignalStore.get(tabId);
+  if (!store) return;
+  if (store.events.length >= DSL_EVENT_BUFFER_MAX) return;
+
+  store.events.push({
+    signalId: message.signalId,
+    count: message.count || 1,
+    resolvedRefs: message.resolvedRefs || null,
+    pageUrl: message.pageUrl || null,
+  });
+}
+
+/**
+ * Resolve runtime context (browser, os, addon id) for the recipient
+ * aggregator.
+ *
+ * The beneficiary id comes from RevolutionConfig.BENEFICIARY_ID and stays the
+ * same across builds — the self-hosted build ships under its own add-on id but
+ * must not fragment attribution on the server. Manifest and name are only
+ * fallbacks for the case that config.js failed to load.
+ */
+function buildAggregatorRuntime() {
+  let addonId = 'addon:revolution';
+  try {
+    if (window.RevolutionConfig?.BENEFICIARY_ID) {
+      addonId = window.RevolutionConfig.BENEFICIARY_ID;
+    } else {
+      const m = browser.runtime.getManifest();
+      if (m?.browser_specific_settings?.gecko?.id) {
+        addonId = `addon:${m.browser_specific_settings.gecko.id}`;
+      } else if (m?.name) {
+        addonId = `addon:${m.name.toLowerCase().replace(/\s+/g, '-')}`;
+      }
+    }
+  } catch { /* ignore */ }
+
+  let browserName = 'browser:unknown';
+  let osName = 'os:unknown';
+  try {
+    const ua = navigator.userAgent || '';
+    if (/Firefox/.test(ua)) browserName = 'browser:firefox';
+    else if (/Edg\//.test(ua)) browserName = 'browser:edge';
+    else if (/Chrome/.test(ua)) browserName = 'browser:chrome';
+    else if (/Safari/.test(ua)) browserName = 'browser:safari';
+
+    if (/Mac OS X|Macintosh/.test(ua)) osName = 'os:macos';
+    else if (/Windows/.test(ua)) osName = 'os:windows';
+    else if (/Android/.test(ua)) osName = 'os:android';
+    else if (/Linux/.test(ua)) osName = 'os:linux';
+  } catch { /* ignore */ }
+
+  return { addonId, browser: browserName, os: osName };
+}
+
+/**
+ * Aggregate a tab's buffered DSL events into BOTH the recipient roll-up
+ * (`Rating.distribution.beneficiaries[]`) and the per-signal breakdown
+ * (`Rating.distribution.signals[]`). Returns null if no events or no
+ * expression are available.
+ *
+ * Returns `{ beneficiaries, signals }` (see DSLRecipientAggregator) or null
+ * — never an empty object — so the caller can decide whether to send a
+ * degenerate rating at all.
+ */
+function aggregateDSLDistribution(tabId, fallbackPageUrl) {
+  const store = dslSignalStore.get(tabId);
+  if (!store || !store.expression || !Array.isArray(store.events) || store.events.length === 0) {
+    return null;
+  }
+  if (typeof window.DSLRecipientAggregator !== 'function') {
+    console.warn('[DSL] DSLRecipientAggregator not loaded');
+    return null;
+  }
+
+  // Inflate event refs against the signal definitions so the aggregator
+  // sees `{ signal, count, resolvedRefs }` (signal is the full object).
+  const signalsById = new Map(
+    (store.expression.signals || []).map(s => [s.id, s])
+  );
+  const events = [];
+  let pageUrl = fallbackPageUrl || null;
+  for (const ev of store.events) {
+    const signal = signalsById.get(ev.signalId);
+    if (!signal) continue;
+    if (ev.pageUrl) pageUrl = ev.pageUrl;
+    events.push({
+      signal,
+      count: ev.count || 1,
+      resolvedRefs: ev.resolvedRefs || null,
+    });
+  }
+  if (events.length === 0) return null;
+
+  const aggregator = new window.DSLRecipientAggregator(buildAggregatorRuntime());
+  const result = aggregator.aggregate(
+    events,
+    { pageUrl },
+    store.expression.crowdWeights || {}
+  );
+
+  if (!result.beneficiaries || result.beneficiaries.length === 0) return null;
+  return result;
+}
+
+// ===== DSL HTTP SOURCE (Phase 2) =====
+//
+// Some signals are resolved via third-party APIs (SponsorBlock, RYD, …).
+// The content script sends a DSL_HTTP_REQUEST with the pre-resolved URL;
+// this code enforces a provider allowlist, checks user opt-in, applies
+// per-session rate limits, caches results, and returns the extracted value.
+
+const DSL_HTTP_TIMEOUT_MS_MAX = 5000;
+const DSL_HTTP_CACHE_TTL_MAX = 24 * 3600 * 1000;
+const DSL_HTTP_MAX_PER_SESSION = 10;
+const DSL_HTTP_CACHE_MAX_ENTRIES = 256;
+
+// Hardcoded host allowlist per provider. The URL in the DSL expression
+// is ignored if its host doesn't match one of these regexes — defense
+// against a compromised crowd-service injecting arbitrary URLs.
+const PROVIDER_ALLOWLIST = {
+  sponsorblock: [/^https:\/\/sponsor\.ajay\.app\//],
+  ryd: [/^https:\/\/returnyoutubedislikeapi\.com\//],
+  nindo: [/^https:\/\/(www\.)?nindo\.de\//],
+  yt_data_v3: [/^https:\/\/www\.googleapis\.com\/youtube\/v3\//],
+};
+
+const OPTIN_STORAGE_KEY = 'revolution_provider_optin';
+const OPTIN_DEFAULT = { mode: 'never', providers: {}, updatedAt: 0 };
+
+// In-memory cache: key = resolvedUrl, value = { value, ts }
+const dslHttpCache = new Map();
+// In-memory counter: number of HTTP fetches performed this session.
+let dslHttpSessionCount = 0;
+
+async function getProviderOptIn() {
+  try {
+    const stored = await browser.storage.local.get(OPTIN_STORAGE_KEY);
+    return stored[OPTIN_STORAGE_KEY] || OPTIN_DEFAULT;
+  } catch {
+    return OPTIN_DEFAULT;
+  }
+}
+
+function isProviderAllowed(optin, provider) {
+  if (!provider) return false;
+  if (optin.mode === 'never') return false;
+  if (optin.mode === 'all') return true;
+  if (optin.mode === 'individual') {
+    return !!optin.providers?.[provider];
+  }
+  return false;
+}
+
+function isUrlOnAllowlist(provider, url) {
+  const patterns = PROVIDER_ALLOWLIST[provider];
+  if (!patterns) return false;
+  return patterns.some(re => re.test(url));
+}
+
+// Minimal JSONPath-like walker. Supports "$.a.b", "a[0].b", "$..key".
+function jsonPathLookup(obj, path) {
+  if (!obj || !path) return null;
+  let p = path.replace(/^\$/, '');
+  if (p.startsWith('..')) {
+    const key = p.slice(2).split(/[.\[]/)[0];
+    const rest = p.slice(2 + key.length);
+    const found = findFirstKeyDeep(obj, key);
+    if (found == null) return null;
+    return rest ? jsonPathLookup(found, rest) : found;
+  }
+  if (p.startsWith('.')) p = p.slice(1);
+  const tokens = p.match(/[^.\[\]]+/g) || [];
+  let cur = obj;
+  for (const t of tokens) {
+    if (cur == null) return null;
+    cur = cur[/^\d+$/.test(t) ? parseInt(t, 10) : t];
+  }
+  return cur == null ? null : cur;
+}
+
+function findFirstKeyDeep(obj, key) {
+  if (obj == null || typeof obj !== 'object') return null;
+  if (Object.prototype.hasOwnProperty.call(obj, key)) return obj[key];
+  if (Array.isArray(obj)) {
+    for (const it of obj) {
+      const r = findFirstKeyDeep(it, key);
+      if (r != null) return r;
+    }
+  } else {
+    for (const k of Object.keys(obj)) {
+      const r = findFirstKeyDeep(obj[k], key);
+      if (r != null) return r;
+    }
+  }
+  return null;
+}
+
+// Applies extract.reduce operators to an array result.
+// Supports:
+//   - "count": array length
+//   - "sum": sum of numeric elements (or element[numericField])
+//   - "sum_length": sum of (end - start) over [start, end] pairs
+function applyReduce(value, extract) {
+  if (!extract || !extract.reduce) return value;
+  const arr = Array.isArray(value) ? value : [value];
+  switch (extract.reduce) {
+    case 'count':
+      return arr.length;
+    case 'sum': {
+      let s = 0;
+      for (const v of arr) s += Number(v) || 0;
+      return s;
+    }
+    case 'sum_length': {
+      let s = 0;
+      for (const v of arr) {
+        if (Array.isArray(v) && v.length >= 2) s += Math.max(0, Number(v[1]) - Number(v[0]));
+      }
+      return s;
+    }
+    default:
+      return value;
+  }
+}
+
+function extractFromResponse(json, extract) {
+  if (!extract) return json;
+  if (extract.method === 'jsonpath') {
+    const raw = jsonPathLookup(json, extract.path || '$');
+    return applyReduce(raw, extract);
+  }
+  return json;
+}
+
+async function fetchWithTimeout(url, method, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const resp = await fetch(url, {
+      method,
+      signal: controller.signal,
+      credentials: 'omit',
+      referrerPolicy: 'no-referrer',
+      headers: { 'Accept': 'application/json' },
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return await resp.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function handleDslHttpRequest(message, sender) {
+  const tabId = sender?.tab?.id;
+  const { signalId, provider, resolvedUrl, method, timeoutMs, cacheMs, extract } = message;
+  const respond = (payload) => {
+    if (tabId != null) {
+      browser.tabs.sendMessage(tabId, {
+        type: 'DSL_HTTP_RESPONSE',
+        signalId,
+        ...payload,
+      }).catch(() => {});
+    }
+  };
+
+  if (!signalId || !provider || !resolvedUrl) {
+    respond({ skipped: true, reason: 'invalid_request' });
+    return;
+  }
+
+  // 1. Allowlist check (defense against compromised server).
+  if (!isUrlOnAllowlist(provider, resolvedUrl)) {
+    console.warn('[DSL-HTTP] blocked: host not in allowlist for provider', provider, resolvedUrl);
+    respond({ skipped: true, reason: 'allowlist' });
+    return;
+  }
+
+  // 2. Opt-in check.
+  const optin = await getProviderOptIn();
+  if (!isProviderAllowed(optin, provider)) {
+    respond({ skipped: true, reason: 'optin' });
+    return;
+  }
+
+  // 3. Cache lookup.
+  const ttl = Math.min(cacheMs || 3600000, DSL_HTTP_CACHE_TTL_MAX);
+  const cached = dslHttpCache.get(resolvedUrl);
+  if (cached && Date.now() - cached.ts < ttl) {
+    respond({ value: cached.value, cached: true });
+    return;
+  }
+
+  // 4. Rate limit.
+  if (dslHttpSessionCount >= DSL_HTTP_MAX_PER_SESSION) {
+    console.warn('[DSL-HTTP] session rate limit reached');
+    respond({ skipped: true, reason: 'rate_limit' });
+    return;
+  }
+  dslHttpSessionCount += 1;
+
+  // 5. Fetch + extract.
+  try {
+    const effectiveTimeout = Math.min(timeoutMs || 3000, DSL_HTTP_TIMEOUT_MS_MAX);
+    const json = await fetchWithTimeout(resolvedUrl, method || 'GET', effectiveTimeout);
+    const value = extractFromResponse(json, extract);
+
+    // Bounded cache: evict oldest if full.
+    if (dslHttpCache.size >= DSL_HTTP_CACHE_MAX_ENTRIES) {
+      const firstKey = dslHttpCache.keys().next().value;
+      if (firstKey !== undefined) dslHttpCache.delete(firstKey);
+    }
+    dslHttpCache.set(resolvedUrl, { value, ts: Date.now() });
+
+    respond({ value });
+  } catch (err) {
+    console.warn('[DSL-HTTP] fetch error', provider, err.message);
+    respond({ skipped: true, reason: 'fetch_error' });
+  }
+}
+
+async function handleProviderOptinUpdate(message) {
+  const mode = ['all', 'individual', 'never'].includes(message.mode) ? message.mode : 'never';
+  const providers = (message.providers && typeof message.providers === 'object') ? message.providers : {};
+  const payload = { mode, providers, updatedAt: Date.now() };
+  try {
+    await browser.storage.local.set({ [OPTIN_STORAGE_KEY]: payload });
+    // Reset rate-limit counter so the user sees the opt-in take effect immediately.
+    dslHttpSessionCount = 0;
+    return { ok: true, optin: payload };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+// ===== END DSL HTTP SOURCE =====
+
+// ===== END DSL SCORING INFRASTRUCTURE =====
+
 const STORAGE_KEY = 'rev_connector_state';
 const SITE_ORIGINS = ['https://api.lenkenhoff.de'];
 const INSTALL_REDIRECT_PATH = '/account.html?addon=firefox';
@@ -218,6 +1108,32 @@ let retroPayoutService = null;
       );
 
       retroPayoutService.start();
+
+      // Expose globally so messaging-integration.js handleRatingCorrectionMessage
+      // can dispatch into processCorrection() when the dashboard broadcasts a
+      // 'rating_correction' message. Without this, dashboard corrections would
+      // only ever be applied by the next 6h-Timer-Pfad.
+      window.retroPayoutService = retroPayoutService;
+
+      // Drain any rating_correction messages that arrived before the service
+      // was ready (handler stored them in pending_rating_corrections).
+      try {
+        const stored = await browser.storage.local.get('pending_rating_corrections');
+        const pending = stored.pending_rating_corrections || [];
+        if (pending.length > 0) {
+          console.log(`[background.js] Draining ${pending.length} pending rating_correction(s)`);
+          for (const correctionPayload of pending) {
+            try {
+              await retroPayoutService.processCorrection(correctionPayload);
+            } catch (drainErr) {
+              console.error('[background.js] Failed to drain pending correction:', drainErr);
+            }
+          }
+          await browser.storage.local.set({ pending_rating_corrections: [] });
+        }
+      } catch (drainErr) {
+        console.error('[background.js] Failed to drain pending corrections:', drainErr);
+      }
 
     } catch (error) {
       console.error('[background.js] ❌ Failed to start RetroPayoutService:', error);
@@ -1815,6 +2731,82 @@ async function initializeBackgroundScript() {
           console.error('[revolution-addon] Session processing failed:', error);
         });
       };
+
+      // Device-level bootstrap — loaded once per addon start, refreshed
+      // every 24 h. Provides the per-device beneficiarySlots (firefox-addon
+      // has browser/os/addon_author/website; desktop has different slots)
+      // and the discovery freedoms (__any__ children).
+      loadDeviceDSL().catch(err => console.warn('[DSL] device bootstrap failed:', err.message));
+
+      // DSL: walk the recursive resource tree on every tab navigation,
+      // combine all matching match-blocks (root → narrowest), inject the
+      // evaluator. The server is stateless across resources — every level
+      // is its own /dsl/<kind>/<key> call, all aggressively cached.
+      browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+        if (!changeInfo.url || !tab.url || tab.url.startsWith('about:') || tab.url.startsWith('chrome:')) return;
+        (async () => {
+          try {
+            // Outlink-passthrough capture: BEFORE we walk the new page's DSL,
+            // check whether the previous DSL match for this tab armed a
+            // distributor signal AND whether the navigation crosses a host
+            // boundary. If yes, stash a "pending hop" the session-end
+            // handler will consume to enqueue a deferred chain entry.
+            const previous = dslSignalStore.get(tabId);
+            if (previous && previous.outlinkPassthrough && previous.host) {
+              let newHost = null;
+              try { newHost = new URL(tab.url).host; } catch { /* ignore */ }
+              if (newHost && newHost !== previous.host) {
+                pendingOutlinkHops.set(tabId, {
+                  marker: previous.outlinkPassthrough,
+                  sourceDomain: previous.host,
+                  sourceUrl: previous.url || null,
+                  capturedAt: Date.now(),
+                });
+                console.log('[outlink-passthrough] hop captured for tab', tabId,
+                  previous.host, '→', newHost);
+              }
+            }
+
+            const matches = await walkDSLForTab(tab);
+            if (matches.length === 0) {
+              dslSignalStore.delete(tabId);
+              return;
+            }
+            const combined = combineExpressions(matches);
+            const outlinkPassthrough = extractOutlinkPassthroughSignal(combined);
+            let host = null;
+            try { host = new URL(tab.url).host; } catch { /* ignore */ }
+            dslSignalStore.set(tabId, {
+              expression: combined,
+              crowdWeights: combined.crowdWeights || {},
+              beneficiarySlots: combined.beneficiarySlots || [],
+              outlinkPassthrough, // null unless this domain opts into outlink_passthrough
+              host,                // captured for outlink-passthrough hop detection
+              url: tab.url,        // captured so the session-end handler can attribute
+              events: [],
+            });
+            if (outlinkPassthrough) {
+              console.log('[DSL] outlink_passthrough armed for tab', tabId,
+                'signalId=', outlinkPassthrough.signalId,
+                'ttlMs=', outlinkPassthrough.ttlMs);
+            }
+            await injectDSLEvaluator(tabId, combined, host);
+          } catch (err) {
+            console.warn('[DSL] Tab navigation handler error:', err.message);
+          }
+        })();
+      });
+
+      // DSL: Clean up on tab close
+      browser.tabs.onRemoved.addListener((tabId) => {
+        // dslSignalStore is cleaned up explicitly after aggregation in
+        // handleSessionCompleted (see aggregateDSLDistribution call site) —
+        // deleting it here too raced ahead of that deferred pipeline and
+        // wiped the store before the session's DSL signals could be read.
+        // A pending outlink hop without a follow-up rating is a dead-end:
+        // the user closed the tab instead of following the outlink. Drop it.
+        pendingOutlinkHops.delete(tabId);
+      });
     })
     .catch(error => {
       console.error('[revolution-addon] Tracking init failed:', error.message);
@@ -2218,10 +3210,75 @@ browser.runtime.onMessage.addListener((message, sender) => {
   if (message.type === 'NATIVE_RATING_DETECTED') {
     return handleNativeRating(message, sender);
   }
+
+  // DSL Signal Event from v2 content-script evaluator (one event per
+  // false→true transition / click). Buffered per tab and aggregated at
+  // session end via aggregateDSLDistribution().
+  if (message.type === 'DSL_SIGNAL_EVENT') {
+    handleDSLSignalEvent(message, sender);
+    return;
+  }
+
+  // DSL HTTP-source request from content script (Phase 2).
+  // Fire-and-forget: background eventually sends DSL_HTTP_RESPONSE back
+  // to the originating tab via browser.tabs.sendMessage.
+  if (message.type === 'DSL_HTTP_REQUEST') {
+    handleDslHttpRequest(message, sender);
+    return;
+  }
+
+  // DSL addon-state query from content script. Returns addon-internal
+  // metrics (active, adsBlocked, trackersBlocked) so device-level DSL
+  // signals can modulate the addon beneficiary share.
+  if (message.type === 'DSL_QUERY_ADDON_STATE') {
+    const key = message.key;
+    if (key === 'active') {
+      return Promise.resolve({ value: true });
+    }
+    // Ads/trackers blocked: read from the tab's session customMetrics
+    // or the tracker's active session data. Falls back to 0 if unknown.
+    const tabId = sender?.tab?.id;
+    const session = tabId && tracker ? tracker.getActiveSession?.(tabId) : null;
+    const metrics = session?.customMetrics || {};
+    if (key === 'adsBlocked') {
+      return Promise.resolve({ value: metrics.adsBlocked?.value || 0 });
+    }
+    if (key === 'trackersBlocked') {
+      return Promise.resolve({ value: metrics.trackersBlocked?.value || 0 });
+    }
+    return Promise.resolve({ value: null });
+  }
+
+  // Website → addon: update external-provider opt-in from website settings UI.
+  if (message.type === 'PROVIDER_OPTIN_UPDATE') {
+    return handleProviderOptinUpdate(message);
+  }
   if (message.type === 'CLEAR_COMPLETED_SESSIONS') {
     return tracker.clearCompletedSessions()
       .then(() => ({ ok: true }))
       .catch((error) => ({ ok: false, error: (error && error.message) || 'clear_failed' }));
+  }
+
+  // Website → addon: crowd weight update after user voted on a signal weight.
+  // Updates the local crowd-weights cache so the next DSL evaluation uses
+  // the user's preferred weight immediately without waiting for a DSL refetch.
+  if (message.type === 'CROWD_WEIGHT_UPDATE') {
+    const { crowdScope, value } = message;
+    if (crowdScope && value != null) {
+      // Update all active DSL stores that reference this scope
+      for (const [, store] of dslSignalStore) {
+        if (store.crowdWeights) {
+          store.crowdWeights[crowdScope] = { autoValue: value, hitlScore: 'LOW' };
+        }
+      }
+      // Persist in local DSL cache so future tab loads also use the new weight
+      browser.storage.local.get('dsl:crowdWeightOverrides').then(stored => {
+        const overrides = stored['dsl:crowdWeightOverrides'] || {};
+        overrides[crowdScope] = { autoValue: value, updatedAt: new Date().toISOString() };
+        browser.storage.local.set({ 'dsl:crowdWeightOverrides': overrides });
+      }).catch(() => {});
+    }
+    return Promise.resolve({ ok: true });
   }
 
   // Handle device registration response from website
@@ -2404,6 +3461,44 @@ async function handleSessionCompleted(sessionSummary) {
       DebugLogger.session.processing(sessionSummary.sessionId, domain);
     }
 
+    // === DSL v2: Aggregate buffered signal events ===
+    // Returns { beneficiaries: [{type, entityId, weight}],
+    //          signals: [{signalId, label, count, baseWeight, totalContribution, contributions}] }
+    // - `beneficiaries` lands in `Rating.distribution.beneficiaries[]` (per-entity payout).
+    // - `signals` lands in `Rating.distribution.signals[]` (per DSL signal breakdown
+    //   so the dashboard can show *which* signal triggered with which weight).
+    const dslAggregate = aggregateDSLDistribution(
+      sessionSummary.tabId,
+      sessionSummary.url
+    );
+    const dslBeneficiaries = dslAggregate?.beneficiaries || null;
+    const dslSignals = dslAggregate?.signals || null;
+    if (dslBeneficiaries) {
+      console.log(`[DSL v2] Aggregated ${dslBeneficiaries.length} recipients (${dslSignals?.length || 0} signals) for ${domain}:`,
+        dslBeneficiaries.map(b => `${b.type}:${b.entityId.slice(0, 60)} (w=${b.weight})`));
+      if (typeof DebugLogger !== 'undefined') {
+        DebugLogger.success('dsl_aggregated', 'DSL distribution aggregated', {
+          domain,
+          recipients: dslBeneficiaries.length,
+          signals: dslSignals?.length || 0,
+        });
+      }
+    }
+    // Clean up DSL store for this tab regardless — we don't double-count.
+    dslSignalStore.delete(sessionSummary.tabId);
+
+    // The total score is the sum of ALL beneficiary weights (content, addon,
+    // browser, os). With the page_visit signal guaranteeing a non-zero base
+    // for all 4 types, this is always positive for pages where DSL loaded.
+    let dslScore = null;
+    if (dslBeneficiaries) {
+      const totalWeight = dslBeneficiaries
+        .reduce((sum, b) => sum + (b.weight || 0), 0);
+      if (totalWeight > 0) {
+        dslScore = { score: totalWeight, breakdown: { source: 'dsl-v2-recipients' } };
+      }
+    }
+
     // Konvertiere Session-Daten in erwartetes Format
     const sessionData = {
       sessionId: sessionSummary.sessionId,
@@ -2416,7 +3511,20 @@ async function handleSessionCompleted(sessionSummary) {
         activeTime: sessionSummary.metrics.activeTime,
         passiveTime: sessionSummary.metrics.passiveTime
       },
-      customMetrics: sessionSummary.customMetrics || {}
+      customMetrics: sessionSummary.customMetrics || {},
+      // v2: full per-recipient distribution. RevolutionScoring stamps this
+      // into the rating envelope so the encrypted payload carries it through
+      // to the server's ClientTransactionLogs.
+      dslDistribution: dslBeneficiaries || null,
+      // v2: per-signal breakdown so the analytics dashboard can show *which*
+      // DSL signal triggered with which weight per recipient.
+      dslSignals: dslSignals || null,
+      // Primary scoring signal when DSL is available. When dslScore is null
+      // (e.g. DSL device webhook offline), RevolutionScoring.processSession()
+      // falls through to a local watchtime-based fallback computed from
+      // metrics.activeTime/passiveTime above — that fallthrough is now the
+      // intended, working path, not something being avoided.
+      dslScore: dslScore || null
     };
 
     // Dummy pageData (wird später durch Content-Detection erweitert)
@@ -2447,7 +3555,7 @@ async function handleSessionCompleted(sessionSummary) {
       DebugLogger.session.scored(
         sessionSummary.sessionId,
         result.scoring?.score,
-        result.scoring?.metadata
+        result.distribution?.metadata
       );
     }
 
@@ -2465,6 +3573,46 @@ async function handleSessionCompleted(sessionSummary) {
     } catch (error) {
       console.error('[revolution-addon] ❌ Failed to send rating message:', error);
       // Non-fatal - transaction can still proceed
+    }
+
+    // Outlink-passthrough enqueue hook: if this distributor session ended
+    // because the user navigated to a different host, the URL change was
+    // already detected by the tabs.onUpdated handler, which stashed the
+    // marker in pendingOutlinkHops. Now that we have a finalized ratingRef
+    // we can enqueue the deferred chain entry. Step 4 wires the release.
+    try {
+      const hop = pendingOutlinkHops.get(sessionSummary.tabId);
+      if (hop) {
+        pendingOutlinkHops.delete(sessionSummary.tabId);
+        const ratingRef = result.scoring?.metadata?.ratingRef;
+        const sessionContext = {
+          sessionId: sessionSummary.sessionId,
+          url: hop.sourceUrl || sessionSummary.url,
+          tabId: sessionSummary.tabId,
+        };
+        const enqueued = await enqueuePassthrough(
+          sessionSummary.tabId,
+          hop.sourceDomain,
+          hop.marker,
+          ratingRef,
+          sessionContext,
+        );
+        if (enqueued.atCapacity) {
+          // Step 5 implements forced-anchor resolution. For now: drop the
+          // overflow hop and warn — the existing chain stays intact and
+          // will resolve normally when the user reaches a non-distributor.
+          console.warn('[outlink-passthrough] chain at max depth — overflow hop dropped',
+            'chainId=', enqueued.chainId, 'sourceDomain=', hop.sourceDomain);
+        } else {
+          console.log('[outlink-passthrough] enqueued hop',
+            'chainId=', enqueued.chainId,
+            'chainIndex=', enqueued.chainIndex,
+            'sourceDomain=', hop.sourceDomain);
+        }
+      }
+    } catch (error) {
+      console.error('[outlink-passthrough] enqueue hook failed:', error);
+      // Non-fatal — the normal rating already went out above.
     }
 
     // NOTE: TransactionCorrector is disabled - replaced by RetroPayoutService (background job)
@@ -2832,10 +3980,29 @@ async function sendRatingMessageToWebsite(result, sessionSummary, messagingClien
       sessionId: sessionSummary.sessionId,
       score: result.scoring?.score, // Gesamt-Rating - PFLICHTFELD (kein Fallback)
       tokens: result.distribution?.tokens?.toString() || '0',
+      // ISO 8601 string — the website's ingestor (auto-messaging-init.js)
+      // forwards this as `occurred_at` to ClientTransactionLogs.occurredAt.
+      // Sending a Number here causes node-sqlite3 to bind it as REAL, which
+      // SQLite then stores in the TEXT column as "<millis>.0" — unparseable
+      // by `new Date(...)` and surfaces as "Invalid Date" in the analytics
+      // dashboard. Keep `timestamp` (Number) too for back-compat with any
+      // older website readers that key on it.
+      occurred_at: new Date().toISOString(),
       timestamp: Date.now(),
       paymentType: 'anonymous',
       url: sessionSummary.url || null,
       domain: result.distribution?.domain || extractDomain(sessionSummary.url),
+      breakdown: result.scoring?.breakdown || null,
+      distribution: {
+        beneficiaries: result.scoring?.metadata?.dslDistribution || null,
+        signals: result.scoring?.metadata?.dslSignals || null,
+        tokens: result.distribution?.tokens?.toString() || '0',
+        rawTokens: result.distribution?.metadata?.rawTokens ?? null,
+        safetyFactor: result.distribution?.metadata?.safetyFactor ?? null,
+        payoutFactor: result.distribution?.metadata?.payoutFactor ?? null,
+        standardizedTokens: result.distribution?.metadata?.standardizedTokens ?? null,
+        translationFactor: result.distribution?.metadata?.translationFactor ?? null,
+      },
       metadata: result.distribution?.metadata || {}
     });
 

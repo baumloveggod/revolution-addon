@@ -4,47 +4,31 @@
  * Berechnet zeitbasierten Sicherheitsfaktor für Ratings.
  *
  * WICHTIG: 2-DIMENSIONALE FUNKTION!
- * - Dimension 1: Zeit seit BA→CL Transfer (User-Alter)
+ * - Dimension 1: Zeit seit BA->CL Transfer (User-Alter)
  * - Dimension 2: Zeit seit Rating-Erstellung (Rating-Alter)
  *
  * REGELN:
  * 1. User-Age basiertes SF:
  *    - Tag 0-30: SF = 99% (1% Auszahlung)
- *    - Tag 30-90: Linear 99% → 0% (1% → 100%)
+ *    - Tag 30-90: Linear 99% -> 0% (1% -> 100%)
  *    - Tag 90+: SF = 0% (100% Auszahlung)
  *
  * 2. Rating-Age basiertes SF:
- *    - Rating + 30 Tage ≤ aktuell: SF = 0% (100% Auszahlung)
- *    - Sonst: Linearer Übergang von User-Age-SF → 0%
+ *    - Rating + 30 Tage <= aktuell: SF = 0% (100% Auszahlung)
+ *    - Sonst: Linearer Übergang von User-Age-SF -> 0%
  *
  * 3. Finales SF = min(userAgeSF, ratingAgeSF)
- *
- * BEISPIEL:
- * - User ist Tag 5, Rating ist Tag 0 alt:
- *   - userAgeSF = 0.99 (99%)
- *   - ratingAgeSF = 0.99 (kein Unterschied)
- *   - finalSF = 0.99
- *
- * - User ist Tag 35, Rating ist Tag 0 alt:
- *   - userAgeSF = 0.918 (Tag 30-90 linear)
- *   - ratingAgeSF = 0.918 (noch keine 30 Tage)
- *   - finalSF = 0.918
- *
- * - User ist Tag 35, Rating ist Tag 30 alt:
- *   - userAgeSF = 0.918
- *   - ratingAgeSF = 0.0 (Rating ist 30 Tage alt!)
- *   - finalSF = 0.0 (VOLLE AUSZAHLUNG!)
  *
  * NACHZAHLUNGS-EFFEKT:
  * - Ratings werden automatisch nach 30 Tagen voll ausgezahlt
  * - RetroPayoutService prüft alle 6h und zahlt nach (3x-Regel)
  */
 
-class StartSafetyFactor {
+export class StartSafetyFactor {
   constructor(config = {}) {
     // Konfiguration
     this.USER_PHASE_1_DAYS = config.userPhase1Days || 30;   // Erste Phase: 99% SF
-    this.USER_PHASE_2_DAYS = config.userPhase2Days || 90;   // Zweite Phase: linear 99% → 0%
+    this.USER_PHASE_2_DAYS = config.userPhase2Days || 90;   // Zweite Phase: linear 99% -> 0%
     this.USER_PHASE_1_SF = config.userPhase1SF || 0.99;     // 99% SF in Phase 1
     this.USER_PHASE_2_SF = config.userPhase2SF || 0.0;      // 0% SF ab Tag 90
 
@@ -56,11 +40,11 @@ class StartSafetyFactor {
    *
    * @param {number} ratingTimestamp - Zeitpunkt der Rating-Erstellung (ms)
    * @param {number} currentTimestamp - Aktueller Zeitpunkt (ms)
-   * @param {number} baTransferTimestamp - Zeitpunkt des BA→CL Transfers (ms)
+   * @param {number} baTransferTimestamp - Zeitpunkt des BA->CL Transfers (ms)
    * @returns {number} Safety Factor (0.0 - 0.99)
    */
   calculateStartSF(ratingTimestamp, currentTimestamp, baTransferTimestamp) {
-    // Dimension 1: User-Age (Zeit seit BA→CL Transfer)
+    // Dimension 1: User-Age (Zeit seit BA->CL Transfer)
     const userAgeDays = this.getDaysSince(baTransferTimestamp, ratingTimestamp);
     const userAgeSF = this.calculateUserAgeSF(userAgeDays);
 
@@ -77,7 +61,7 @@ class StartSafetyFactor {
   /**
    * Dimension 1: User-Age basiertes SF
    *
-   * @param {number} daysSinceBATransfer - Tage seit BA→CL Transfer
+   * @param {number} daysSinceBATransfer - Tage seit BA->CL Transfer
    * @returns {number} Safety Factor (0.0 - 0.99)
    */
   calculateUserAgeSF(daysSinceBATransfer) {
@@ -85,7 +69,7 @@ class StartSafetyFactor {
       // Phase 1: Konstant 99%
       return this.USER_PHASE_1_SF;
     } else if (daysSinceBATransfer < this.USER_PHASE_2_DAYS) {
-      // Phase 2: Linear 99% → 0%
+      // Phase 2: Linear 99% -> 0%
       const progress = (daysSinceBATransfer - this.USER_PHASE_1_DAYS) /
                       (this.USER_PHASE_2_DAYS - this.USER_PHASE_1_DAYS);
       return this.USER_PHASE_1_SF - (progress * this.USER_PHASE_1_SF);
@@ -104,7 +88,7 @@ class StartSafetyFactor {
    */
   calculateRatingAgeSF(daysSinceRating, userAgeSF) {
     if (daysSinceRating >= this.RATING_MATURITY_DAYS) {
-      // Rating ist "reif" (30 Tage alt) → Volle Auszahlung
+      // Rating ist "reif" (30 Tage alt) -> Volle Auszahlung
       return 0.0;
     }
 
@@ -135,7 +119,7 @@ class StartSafetyFactor {
    * Backward Compatibility: Alte 1D-Funktion
    * Verwendet nur User-Age, ignoriert Rating-Age
    *
-   * @param {number} daysSinceBATransfer - Tage seit BA→CL Transfer
+   * @param {number} daysSinceBATransfer - Tage seit BA->CL Transfer
    * @returns {number} Safety Factor (0.0 - 0.99)
    */
   calculateSafetyFactor(daysSinceBATransfer) {
@@ -186,9 +170,4 @@ class StartSafetyFactor {
   static exampleCalculations() {
     // Example calculations for testing/debugging - no output
   }
-}
-
-// Export für background.js
-if (typeof window !== 'undefined') {
-  window.StartSafetyFactor = StartSafetyFactor;
 }

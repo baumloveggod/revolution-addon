@@ -9,7 +9,7 @@
  * WICHTIG: Deterministisch - gleiche Seite → gleicher Content-Typ
  */
 
-class ContentDetector {
+export class ContentDetector {
   constructor(config) {
     this.config = config;
   }
@@ -449,14 +449,4 @@ class ContentDetector {
   getMultiplier(contentType) {
     return this.config.contentTypes[contentType] || this.config.contentTypes.UNKNOWN;
   }
-}
-
-// Export für Browser-Extension (non-module)
-if (typeof window !== 'undefined') {
-  window.ContentDetector = ContentDetector;
-}
-
-// Export für Node.js/Tests
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = ContentDetector;
 }

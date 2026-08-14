@@ -22,7 +22,8 @@ window.MessagingClient = function MessagingClient(options) {
 
     if (isError || isWarning || isImportant) {
       const timestamp = new Date().toISOString();
-      console.warn(`[${timestamp}] [MessagingClient] ${operation}`, data);
+      const log = (typeof RevLog !== 'undefined') ? RevLog : console;
+      log.warn(`[${timestamp}] [MessagingClient] ${operation}`, data);
     }
   };
 
@@ -282,7 +283,12 @@ window.MessagingClient.prototype.sendMessage = async function(payload, type, rec
     }
 
     const encryptedPayloads = {};
-    const payloadString = JSON.stringify(payload);
+    // Wrap the real type inside the encrypted payload so the server never sees it
+    const envelopeType = (type === 'client_disconnected') ? type : 'encrypted';
+    const innerPayload = (envelopeType === 'encrypted')
+      ? { _type: type, ...payload }
+      : payload;
+    const payloadString = JSON.stringify(innerPayload);
 
     for (const recipientAddress of recipients) {
       // Look up recipient key - try multiple sources:
@@ -339,11 +345,11 @@ window.MessagingClient.prototype.sendMessage = async function(payload, type, rec
       encryptedPayloads[recipientAddress] = encrypted;
     }
 
-    // Create message structure
+    // Create message structure — outer type is opaque to the server
     const messageId = crypto.randomUUID();
     const message = {
       id: messageId,
-      type: type,
+      type: envelopeType,
       timestamp: Date.now(),
       nonce: await window.MessagingCrypto.generateNonce(),
       sender: this.messagingAddress,
@@ -479,17 +485,11 @@ window.MessagingClient.prototype.processMessage = async function(message) {
       return;
     }
 
-    // Get sender's public key
+    // Get sender's public key — try all sources regardless of message type
     let senderKey = this.groupKeys[message.sender];
 
-    // For key_rotation/address_update messages, we need to accept messages from unknown senders
-    // because this is how we get the initial group keys (bootstrap problem)
-    if (!senderKey && (message.type === 'key_rotation' || message.type === 'address_update')) {
-      this.debugLog('⚠️ Unknown sender for address_update - fetching sender key from messaging service', {
-        sender: message.sender?.substring(0, 16) + '...'
-      });
-
-      // Fetch all keys from messaging service to get the sender's public key
+    if (!senderKey) {
+      // Try fetching from messaging service (handles bootstrap for any message type)
       try {
         const response = await window.fetchWithVersion(`${this.serviceUrl}/keys?groupId=${this.groupId}`, {
           headers: {
@@ -499,7 +499,6 @@ window.MessagingClient.prototype.processMessage = async function(message) {
 
         if (response.ok) {
           const data = await response.json();
-          // Look up by messagingAddress (= fingerprint field in response)
           const senderKeyData = data.keys?.find(k =>
             (k.messaging_address || k.fingerprint) === message.sender
           );
@@ -509,25 +508,15 @@ window.MessagingClient.prototype.processMessage = async function(message) {
               publicKey: senderKeyData.publicKey,
               signingPublicKey: senderKeyData.signingPublicKey
             };
-          } else {
-            this.debugLog('❌ Sender key not found in messaging service', {
-              sender: message.sender?.substring(0, 16) + '...'
-            });
-            return;
           }
-        } else {
-          this.debugLog('❌ Failed to fetch keys from messaging service', {
-            status: response.status
-          });
-          return;
         }
       } catch (error) {
-        this.debugLog('❌ Error fetching sender key', { error: error.message });
-        return;
+        this.debugLog('⚠️ Error fetching sender key from service', { error: error.message });
       }
-    } else if (!senderKey) {
+    }
+
+    if (!senderKey) {
       // Fallback: search known_devices and website_keys from browser.storage
-      // (same sources sendMessage uses for recipients)
       try {
         const storage = await browser.storage.local.get(['website_keys', 'known_devices']);
         const websiteKeys = storage.website_keys || null;
@@ -550,14 +539,14 @@ window.MessagingClient.prototype.processMessage = async function(message) {
       } catch (e) {
         this.debugLog('⚠️ Could not load keys from browser.storage for sender lookup', { error: e.message });
       }
+    }
 
-      if (!senderKey) {
-        this.debugLog('⚠️ Unknown sender', {
-          sender: message.sender?.substring(0, 16) + '...',
-          knownAddresses: Object.keys(this.groupKeys).map(k => k.substring(0, 16) + '...')
-        });
-        return;
-      }
+    if (!senderKey) {
+      this.debugLog('⚠️ Unknown sender', {
+        sender: message.sender?.substring(0, 16) + '...',
+        knownAddresses: Object.keys(this.groupKeys).map(k => k.substring(0, 16) + '...')
+      });
+      return;
     }
 
     // Decrypt
@@ -570,6 +559,16 @@ window.MessagingClient.prototype.processMessage = async function(message) {
 
     const payload = JSON.parse(decrypted);
 
+    // Extract real type: v2 messages have _type inside payload, legacy has type on envelope
+    let messageType;
+    if (message.type === 'encrypted' && payload._type) {
+      messageType = payload._type;
+      delete payload._type;
+    } else {
+      // Legacy message or client_disconnected — type is on the envelope
+      messageType = message.type;
+    }
+
     // Acknowledge receipt
     await this.acknowledgeMessage(message.id);
 
@@ -577,7 +576,7 @@ window.MessagingClient.prototype.processMessage = async function(message) {
     if (this.onMessage) {
       this.onMessage({
         id: message.id,
-        type: message.type,
+        type: messageType,
         timestamp: message.timestamp,
         sender: message.sender,
         payload: payload
@@ -640,8 +639,14 @@ window.MessagingClient.prototype.startPolling = function() {
     if (!self.isPolling) {
       return;
     }
-    await self.poll();
-    self.pollTimer = setTimeout(doPoll, self.pollInterval);
+    try {
+      await self.poll();
+    } catch (_e) {
+      // Error already handled via onError callback; keep polling
+    }
+    if (self.isPolling) {
+      self.pollTimer = setTimeout(doPoll, self.pollInterval);
+    }
   };
 
   doPoll();
@@ -792,7 +797,12 @@ window.MessagingClient.prototype.sendMessageZeroKnowledge = async function(paylo
     }
 
     const encryptedPayloads = {};
-    const payloadString = JSON.stringify(payload);
+    // Wrap the real type inside the encrypted payload
+    const envelopeType = (type === 'client_disconnected') ? type : 'encrypted';
+    const innerPayload = (envelopeType === 'encrypted')
+      ? { _type: type, ...payload }
+      : payload;
+    const payloadString = JSON.stringify(innerPayload);
     const recipientAddresses = [];
 
     for (const recipient of recipients) {
@@ -816,11 +826,11 @@ window.MessagingClient.prototype.sendMessageZeroKnowledge = async function(paylo
       throw new Error('Failed to encrypt for any recipients');
     }
 
-    // Create message structure
+    // Create message structure — outer type is opaque to the server
     const messageId = crypto.randomUUID();
     const message = {
       id: messageId,
-      type: type,
+      type: envelopeType,
       timestamp: Date.now(),
       nonce: await window.MessagingCrypto.generateNonce(),
       sender: this.messagingAddress,

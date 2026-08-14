@@ -12,6 +12,19 @@ SOURCE_FILE="$BUILD_DIR/revolution-addon-source.zip"
 echo "📦 Building Source Code Package for AMO..."
 echo "📁 Source: $ADDON_DIR"
 
+# Wallet-/Scoring-Quellen aus packages/revolution-wallet uebernehmen (reines
+# Kopieren, keine Transformation) - haelt vendor/revolution-client/ aktuell.
+WALLET_SRC="$ADDON_DIR/../packages/revolution-wallet/src"
+VENDOR_DIR="$ADDON_DIR/vendor/revolution-client"
+echo "📚 Syncing wallet/scoring sources from packages/revolution-wallet..."
+mkdir -p "$VENDOR_DIR"
+for f in "$WALLET_SRC"/*.js; do
+  base="$(basename "$f")"
+  # node-storage-adapter ist reiner Node.js-Code und wird im Addon nie geladen
+  [ "$base" = "node-storage-adapter.js" ] && continue
+  cp "$f" "$VENDOR_DIR/$base"
+done
+
 # Erstelle Build-Verzeichnis falls nicht vorhanden
 mkdir -p "$BUILD_DIR"
 
@@ -61,6 +74,8 @@ Das Addon verwendet **KEINE** Build-Tools, Bundler oder Transpiler. Alle Dateien
 3. Das resultierende ZIP-File befindet sich in `build/revolution-addon.zip`
 
 Das Build-Script (`build-addon.sh`) führt lediglich folgende Schritte aus:
+- Kopiert `vendor/revolution-client/*.js` unveraendert aus dem separaten
+  `packages/revolution-wallet`-Quellpaket (kein Bundler, keine Transformation)
 - Kopiert die relevanten Dateien (ohne Test-Dateien und Build-Artefakte)
 - Erstellt ein ZIP-Archiv
 
@@ -71,15 +86,15 @@ Das Build-Script (`build-addon.sh`) führt lediglich folgende Schritte aus:
 ```
 firefox-addon/
 ├── manifest.json          # Addon-Manifest
+├── background.html        # Background-Page (laedt die Skripte unten in Reihenfolge)
 ├── background.js          # Haupt-Background-Script
 ├── popup.html/js/css      # Popup-UI
 ├── contentScript.js       # Content-Script für Website-Integration
 ├── sodium.js              # Libsodium (minifiziert, extern)
 ├── messaging-client/      # Messaging-System
 ├── crypto/                # Kryptografie-Module
-├── wallet/                # Wallet-Management
+├── vendor/revolution-client/  # Wallet-/Scoring-/Distribution-Quellen (unveraendert kopiert)
 ├── scoring/               # Content-Bewertung
-├── distribution/          # Verteilungs-Engine
 ├── privacy/               # Privacy-Layer
 ├── ngo/                   # NGO-Integration
 └── services/              # Utility-Services
@@ -122,7 +137,7 @@ echo "✅ Source code package erstellt!"
 echo "📄 Datei: $SOURCE_FILE"
 echo ""
 echo "📤 Bei der AMO-Einreichung:"
-echo "1. Beantworten Sie 'Ja' bei der Frage nach Build-Tools"
+echo "1. Beantworten Sie 'Nein' bei der Frage nach Build-Tools"
 echo "2. Laden Sie diese Source-Code-Datei hoch: $SOURCE_FILE"
 echo "3. Erklären Sie in den Notizen:"
 echo "   'Das Addon enthält sodium.js (libsodium-wrappers 0.7.13)"

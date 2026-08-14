@@ -11,7 +11,7 @@
  * WICHTIG: Alle Faktoren sind multiplikativ (0.0 - 2.0+)
  */
 
-class QualityAnalyzer {
+export class QualityAnalyzer {
   constructor(config) {
     this.config = config;
   }
@@ -206,16 +206,6 @@ class QualityAnalyzer {
     let adCount = 0;
     const adElements = [];
 
-    // Class-/ID-Namen die auf Ads hindeuten
-    const adIndicators = [
-      'ad-container',
-      'advertisement',
-      'ad-slot',
-      'google-ad',
-      'sponsored',
-      'promo-box'
-    ];
-
     // Zähle Ad-Indikatoren (aus Content Script)
     if (domData.adClassCount) {
       adCount += domData.adClassCount;
@@ -272,14 +262,4 @@ class QualityAnalyzer {
       hasKeyboardNavigation: domData.hasKeyboardNav || false
     };
   }
-}
-
-// Export für Browser-Extension (non-module)
-if (typeof window !== 'undefined') {
-  window.QualityAnalyzer = QualityAnalyzer;
-}
-
-// Export für Node.js/Tests
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = QualityAnalyzer;
 }

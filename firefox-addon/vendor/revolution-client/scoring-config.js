@@ -257,12 +257,23 @@ const CONFIG = Object.freeze({
   scores: SCORE_NORMALIZATION
 });
 
-// Export für Browser-Extension (non-module)
-if (typeof window !== 'undefined') {
-  window.ScoringConfig = CONFIG;
-}
-
-// Export für Node.js/Tests
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = CONFIG;
-}
+export default CONFIG;
+export {
+  CONFIG,
+  SCORING_CONFIG_VERSION,
+  TOKENS_PER_EURO,
+  MONTHLY_BUDGET_EUR,
+  MONTHLY_BUDGET_TOKENS,
+  TIME_CONSTANTS,
+  CONTENT_TYPE_MULTIPLIERS,
+  INTERACTION_WEIGHTS,
+  QUALITY_FACTORS,
+  OSS_BONUS,
+  SATISFACTION_WEIGHTS,
+  E48_SERIES,
+  E24_SERIES,
+  PROGNOSIS_WEIGHTS,
+  CONSERVATIVITY_CONFIG,
+  SNAPSHOT_TIMES_UTC,
+  SCORE_NORMALIZATION
+};

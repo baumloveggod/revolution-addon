@@ -12,7 +12,7 @@
 
   // Check dependencies immediately (only log errors)
   if (typeof sodium === 'undefined' || typeof window.MessagingCrypto === 'undefined' || typeof window.MessagingClient === 'undefined') {
-    console.error('[MessagingIntegration] Missing dependencies!');
+    RevLog.error('[MessagingIntegration] Missing dependencies!');
   }
 
   let messagingClient = null;
@@ -50,7 +50,7 @@
       client.startPolling();
       return;
     } catch (error) {
-      console.error('[MessagingIntegration] ❌ Failed to start polling:', error.message);
+      RevLog.error('[MessagingIntegration] ❌ Failed to start polling:', error.message);
       // Retry after 30 seconds
       setTimeout(() => startPollingWithRetry(client, groupId, authToken), 30000);
     }
@@ -74,9 +74,9 @@
       }
     } catch (error) {
       if (isLocalDev) {
-        console.warn('[MessagingIntegration] ⚠️ Local dev server not reachable at', origin);
+        RevLog.warn('[MessagingIntegration] ⚠️ Local dev server not reachable at', origin);
       } else {
-        console.warn('[MessagingIntegration] ⚠️ Failed to get config, using default', error.message);
+        RevLog.warn('[MessagingIntegration] ⚠️ Failed to get config, using default', error.message);
       }
     }
 
@@ -94,9 +94,7 @@
    */
   window.MessagingIntegration.initMessaging = async function(
     userToken,
-    origin = (window.RevolutionConfig && window.RevolutionConfig.DEBUG_MODE)
-      ? 'http://localhost:3000'
-      : 'https://api.lenkenhoff.de'
+    origin = 'https://api.lenkenhoff.de'
   ) {
     // Skip if initialization is in progress - return existing promise instead of busy-wait
     if (isInitializing && initializationPromise) {
@@ -148,7 +146,7 @@
             startPollingWithRetry(messagingClient, groupId, userToken);
           }
         } catch (error) {
-          console.error('[MessagingIntegration] ❌ Failed to update token:', error.message);
+          RevLog.error('[MessagingIntegration] ❌ Failed to update token:', error.message);
         }
       }
 
@@ -169,7 +167,7 @@
           userId = tokenPayload.userId || tokenPayload.id;
           groupId = `group-user-${userId}`;
         } catch (error) {
-          console.error('[MessagingIntegration] ❌ Could not parse token:', error.message);
+          RevLog.error('[MessagingIntegration] ❌ Could not parse token:', error.message);
         }
       }
 
@@ -200,7 +198,7 @@
       };
 
       messagingClient.onError = (error) => {
-        console.error('[MessagingIntegration] ❌ onError triggered:', error.message);
+        RevLog.error('[MessagingIntegration] ❌ onError triggered:', error.message);
         // NOT_REGISTERED means the server no longer knows this client.
         // Only treat as account_deleted if we know this device was previously linked —
         // meaning it was registered and got revoked server-side.
@@ -209,14 +207,29 @@
         if (error.code === 'NOT_REGISTERED') {
           if (isLinked) {
             // Device was registered but got revoked server-side → full logout
+            if (typeof DebugLogger !== 'undefined') {
+              DebugLogger.error('device_revoked', 'Device revoked server-side (NOT_REGISTERED after linking)');
+            }
             messagingClient.stopPolling();
             handleAccountDeleted();
           } else {
             // Device not yet linked — keep polling, ADDRESS_UPDATE will arrive after registration
-            console.warn('[MessagingIntegration] ⚠️ NOT_REGISTERED but device not yet linked — continuing to poll');
+            RevLog.warn('[MessagingIntegration] ⚠️ NOT_REGISTERED but device not yet linked — continuing to poll');
           }
         }
       };
+
+      // Fetch group keys before polling so we can decrypt incoming messages.
+      // Bootstrap keys from the claim flow are lost after addon restart because
+      // groupKeys is kept in memory only. Without this, every sender is "unknown".
+      if (groupId && userToken) {
+        try {
+          await messagingClient.fetchGroupKeys();
+          RevLog.debug('[MessagingIntegration] Group keys loaded:', Object.keys(messagingClient.groupKeys).length, 'key(s)');
+        } catch (error) {
+          RevLog.warn('[MessagingIntegration] ⚠️ Failed to fetch group keys (will retry on next init):', error.message);
+        }
+      }
 
       // Start polling (client already registered during claim flow)
       if (groupId && userToken) {
@@ -227,14 +240,12 @@
         isInitializing = false;
         initializationPromise = null;
 
-        console.log('[MessagingIntegration] ✅ initMessaging SUCCESS', {
-          fingerprint: messagingClient.fingerprint?.substring(0, 16) + '...'
-        });
+        RevLog.debug('[MessagingIntegration] initMessaging SUCCESS');
 
         return messagingClient;
 
       } catch (error) {
-        console.error('[MessagingIntegration] ❌ Initialization failed:', error.message, error.stack);
+        RevLog.error('[MessagingIntegration] ❌ Initialization failed:', error.message, error.stack);
         isInitialized = false;
         isInitializing = false;
         initializationPromise = null;
@@ -305,11 +316,17 @@ function handleMessage(message) {
     case 'feedback':
       handleFeedbackMessage(message.payload);
       break;
+    case 'rating_correction':
+      handleRatingCorrectionMessage(message.payload);
+      break;
     case 'account_deleted':
       handleAccountDeleted();
       break;
+    case 'preferences_update':
+      handlePreferencesUpdate(message.payload);
+      break;
     default:
-      console.warn('[MessagingIntegration] ⚠️ Unknown message type:', message.type);
+      RevLog.warn('[MessagingIntegration] ⚠️ Unknown message type:', message.type);
   }
 }
 
@@ -331,7 +348,7 @@ async function handleFeedbackMessage(payload) {
     }
 
     if (!feedbackData || !feedbackData.rating_ref || !feedbackData.feedback_type) {
-      console.error('[MessagingIntegration] ❌ Invalid feedback payload:', feedbackData);
+      RevLog.error('[MessagingIntegration] ❌ Invalid feedback payload:', feedbackData);
       return;
     }
 
@@ -340,14 +357,123 @@ async function handleFeedbackMessage(payload) {
       const manager = new window.FeedbackManager();
       await manager.processFeedback(feedbackData);
     } else {
-      console.warn('[MessagingIntegration] ⚠️ FeedbackManager not loaded, storing for later');
+      RevLog.warn('[MessagingIntegration] ⚠️ FeedbackManager not loaded, storing for later');
       const stored = await browser.storage.local.get('pending_feedback');
       const pending = stored.pending_feedback || [];
       pending.push(feedbackData);
       await browser.storage.local.set({ pending_feedback: pending });
     }
   } catch (error) {
-    console.error('[MessagingIntegration] ❌ Failed to handle feedback message:', error.message);
+    RevLog.error('[MessagingIntegration] ❌ Failed to handle feedback message:', error.message);
+  }
+}
+
+/**
+ * Handle a manual rating correction sent from the dashboard.
+ *
+ * The dashboard's rating-edit-ui.js submitCorrection() broadcasts this message
+ * after the user edits a rating in analytics.html. The message reaches all
+ * devices in the user's group; only the device that actually has the rating
+ * in its local rev_rating_history_30d will act (others ignore via processCorrection).
+ *
+ * Acting means: update the local rating record AND queue a delta-mint to the
+ * central ledger. Without this handler the dashboard correction would only
+ * exist as an audit log entry on the server, and DS in analytics would never
+ * update — see plan dapper-floating-pnueli.md.
+ *
+ * Expected payload (from rating-edit-ui.js submitCorrection):
+ *   { rating_ref, correction_ref, rating_group_id, domain, new_score,
+ *     new_safety_factor, translation_factor, prognosis_safety_factor,
+ *     beneficiary_type, beneficiary_id, submitted_at }
+ */
+async function handleRatingCorrectionMessage(payload) {
+  try {
+    let data = payload;
+    if (typeof payload === 'string') {
+      try { data = JSON.parse(payload); } catch (_) { data = payload; }
+    }
+
+    if (!data || !data.rating_ref || data.new_score == null) {
+      RevLog.error('[MessagingIntegration] ❌ Invalid rating_correction payload:', data);
+      return;
+    }
+
+    const service = window.retroPayoutService;
+    if (!service || typeof service.processCorrection !== 'function') {
+      RevLog.warn('[MessagingIntegration] ⚠️ retroPayoutService not ready — rating_correction queued via 6h timer fallback');
+      // Persist for later retry on next service init
+      const stored = await browser.storage.local.get('pending_rating_corrections');
+      const pending = stored.pending_rating_corrections || [];
+      pending.push(data);
+      await browser.storage.local.set({ pending_rating_corrections: pending });
+      return;
+    }
+
+    const result = await service.processCorrection(data);
+    RevLog.debug('[MessagingIntegration] rating_correction processed:', result);
+  } catch (error) {
+    RevLog.error('[MessagingIntegration] ❌ Failed to handle rating_correction message:', error.message);
+  }
+}
+
+/**
+ * Handle preferences update from website.
+ *
+ * Stores user rating preferences locally and applies them to future scorings.
+ * Also triggers retroactive correction for domain weight changes (Phase 3).
+ *
+ * Expected payload shape:
+ *   { type: 'PREFERENCES_UPDATE', version: '2.0.0', timestamp, preferences, changes }
+ *
+ * preferences: { contentTypeMultipliers, qualityStrictness, ossImportance, domainWeights }
+ * changes: { domainWeights: { 'youtube.com': { from: 1.0, to: 1.5 } }, ... } (optional)
+ */
+async function handlePreferencesUpdate(payload) {
+  try {
+    let data = payload;
+    if (typeof payload === 'string') {
+      try { data = JSON.parse(payload); } catch (_) { data = payload; }
+    }
+
+    if (!data || !data.preferences) {
+      RevLog.error('[MessagingIntegration] Invalid preferences_update payload:', data);
+      return;
+    }
+
+    RevLog.debug('[MessagingIntegration] Received PREFERENCES_UPDATE v' + (data.version || '?'));
+
+    // Load existing preferences
+    const stored = await browser.storage.local.get('rev_user_preferences');
+    const existing = stored.rev_user_preferences || {};
+
+    // Merge: new values override existing
+    const merged = {
+      ...existing,
+      ...data.preferences,
+      _lastUpdated: Date.now(),
+      _version: data.version || '2.0.0'
+    };
+
+    // Store merged preferences
+    await browser.storage.local.set({ rev_user_preferences: merged });
+
+    RevLog.debug('[MessagingIntegration] Preferences saved:', Object.keys(data.preferences).join(', '));
+
+    // Log changes for debugging
+    if (data.changes) {
+      const changeKeys = Object.keys(data.changes);
+      RevLog.debug('[MessagingIntegration] Changes:', changeKeys.join(', '));
+
+      // Domain weight changes — log affected domains
+      if (data.changes.domainWeights) {
+        const domains = Object.keys(data.changes.domainWeights);
+        RevLog.debug(`[MessagingIntegration] Domain weight changes: ${domains.length} domains`);
+      }
+    }
+
+    showNotification('Einstellungen aktualisiert', 'Neue Bewertungs-Einstellungen von der Webseite empfangen.');
+  } catch (error) {
+    RevLog.error('[MessagingIntegration] Failed to handle preferences_update:', error.message);
   }
 }
 
@@ -360,7 +486,7 @@ function handleDeviceRegistered(payload) {
     const { walletAddress, wallet_key, groupKeys, deviceId, userId } = payload;
 
     if (!walletAddress || !wallet_key) {
-      console.error('[MessagingIntegration] ❌ Missing wallet data in registration confirmation');
+      RevLog.error('[MessagingIntegration] ❌ Missing wallet data in registration confirmation');
       return;
     }
 
@@ -378,7 +504,7 @@ function handleDeviceRegistered(payload) {
         receivedAt: Date.now()
       }
     }).catch(error => {
-      console.error('[MessagingIntegration] ❌ Failed to store wallet:', error);
+      RevLog.error('[MessagingIntegration] ❌ Failed to store wallet:', error);
     });
 
     // Update group keys if provided
@@ -398,7 +524,7 @@ function handleDeviceRegistered(payload) {
     storeMessageLog('device_registered', payload);
 
   } catch (error) {
-    console.error('[MessagingIntegration] ❌ Error handling device registration:', error);
+    RevLog.error('[MessagingIntegration] ❌ Error handling device registration:', error);
   }
 }
 
@@ -431,7 +557,7 @@ async function handleRatingSummaryMessage(payload) {
   try {
     // Validiere Payload
     if (!payload.seedCLtoSH || !payload.transactionIndices || !payload.amounts) {
-      console.error('[MessagingIntegration] Invalid RATING_SUMMARY: missing required fields');
+      RevLog.error('[MessagingIntegration] Invalid RATING_SUMMARY: missing required fields');
       return;
     }
 
@@ -477,7 +603,7 @@ async function handleRatingSummaryMessage(payload) {
     // TODO: Optional: Query Central Ledger für Status der Fingerprints
 
   } catch (error) {
-    console.error('[MessagingIntegration] ❌ Failed to process RATING_SUMMARY:', error);
+    RevLog.error('[MessagingIntegration] ❌ Failed to process RATING_SUMMARY:', error);
   }
 }
 
@@ -501,7 +627,7 @@ async function storeRatingSummaryNotification(notification) {
     });
 
   } catch (error) {
-    console.error('[MessagingIntegration] ❌ Failed to store notification:', error);
+    RevLog.error('[MessagingIntegration] ❌ Failed to store notification:', error);
   }
 }
 
@@ -520,12 +646,12 @@ async function handleAddressUpdate(payload) {
     const { signature, cl_wallet_key, ...data } = payload;
 
     if (!signature) {
-      console.error('[MessagingIntegration] ❌ No signature in ADDRESS_UPDATE message');
+      RevLog.error('[MessagingIntegration] ❌ No signature in ADDRESS_UPDATE message');
       return;
     }
 
     if (!data.website || !data.website.messaging_address) {
-      console.error('[MessagingIntegration] ❌ No website info in ADDRESS_UPDATE message');
+      RevLog.error('[MessagingIntegration] ❌ No website info in ADDRESS_UPDATE message');
       return;
     }
 
@@ -553,12 +679,15 @@ async function handleAddressUpdate(payload) {
     );
 
     if (!isValid) {
-      console.error('[MessagingIntegration] ❌ Invalid ADDRESS_UPDATE signature - ignoring!');
+      RevLog.error('[MessagingIntegration] Invalid ADDRESS_UPDATE signature - ignoring!');
+      if (typeof DebugLogger !== 'undefined') {
+        DebugLogger.error('invalid_signature', 'Invalid ADDRESS_UPDATE signature detected');
+      }
       showNotification('⚠️ Sicherheitswarnung', 'Ungültige ADDRESS_UPDATE Signatur erkannt!');
       return;
     }
 
-    console.log('[MessagingIntegration] ✅ ADDRESS_UPDATE signature verified');
+    RevLog.info('[MessagingIntegration] ADDRESS_UPDATE signature verified');
 
     // Decrypt CL wallet private key if present
     let clWalletPrivateKey = null;
@@ -587,7 +716,7 @@ async function handleAddressUpdate(payload) {
 
         clWalletPrivateKey = new TextDecoder().decode(decryptedBytes);
       } catch (decryptError) {
-        console.error('[MessagingIntegration] ❌ Failed to decrypt CL wallet key:', decryptError.message);
+        RevLog.error('[MessagingIntegration] ❌ Failed to decrypt CL wallet key:', decryptError.message);
       }
     }
 
@@ -620,9 +749,9 @@ async function handleAddressUpdate(payload) {
         source: 'address_update'
       };
 
-      console.log('[MessagingIntegration] 💾 CL Wallet stored from ADDRESS_UPDATE');
+      RevLog.info('[MessagingIntegration] CL Wallet stored from ADDRESS_UPDATE');
     } else {
-      console.warn('[MessagingIntegration] ⚠️ CL Wallet NOT stored - missing private key or address');
+      RevLog.warn('[MessagingIntegration] ⚠️ CL Wallet NOT stored - missing private key or address');
     }
 
     // Save to browser storage
@@ -646,10 +775,10 @@ async function handleAddressUpdate(payload) {
 
           await window.retryWalletInitIfNeeded();
         } catch (error) {
-          console.error('[MessagingIntegration] ❌ Failed to init wallets:', error);
+          RevLog.error('[MessagingIntegration] ❌ Failed to init wallets:', error);
         }
       } else {
-        console.warn('[MessagingIntegration] ⚠️ retryWalletInitIfNeeded not yet available');
+        RevLog.warn('[MessagingIntegration] ⚠️ retryWalletInitIfNeeded not yet available');
       }
     }
 
@@ -672,7 +801,7 @@ async function handleAddressUpdate(payload) {
       if (typeof window.loadState === 'function') {
         currentState = await window.loadState() || {};
       } else {
-        console.warn('[MessagingIntegration] ⚠️ loadState function not available, using empty state');
+        RevLog.warn('[MessagingIntegration] ⚠️ loadState function not available, using empty state');
         currentState = window._revolutionState || {};
       }
 
@@ -704,7 +833,7 @@ async function handleAddressUpdate(payload) {
       if (typeof window.persistState === 'function') {
         await window.persistState(updatedState);
       } else {
-        console.warn('[MessagingIntegration] ⚠️ persistState function not available');
+        RevLog.warn('[MessagingIntegration] ⚠️ persistState function not available');
       }
     }
 
@@ -737,7 +866,7 @@ async function handleAddressUpdate(payload) {
     showNotification('🔑 Adressbuch aktualisiert', `${(data.devices || []).length} Geräte empfangen${hasWallet}`);
 
   } catch (error) {
-    console.error('[MessagingIntegration] ❌ Failed to handle ADDRESS_UPDATE:', error.message, error.stack);
+    RevLog.error('[MessagingIntegration] ❌ Failed to handle ADDRESS_UPDATE:', error.message, error.stack);
   }
 }
 
@@ -746,7 +875,7 @@ async function handleAddressUpdate(payload) {
  */
 async function handleKeyRotation(payload) {
   if (!messagingClient) {
-    console.error('[MessagingIntegration] ❌ No messaging client available');
+    RevLog.error('[MessagingIntegration] ❌ No messaging client available');
     return;
   }
 
@@ -756,7 +885,7 @@ async function handleKeyRotation(payload) {
     const myPayload = payload[myFingerprint];
 
     if (!myPayload || !myPayload.ciphertext || !myPayload.nonce) {
-      console.warn('[MessagingIntegration] ⚠️ No encrypted payload for our client in key_rotation');
+      RevLog.warn('[MessagingIntegration] ⚠️ No encrypted payload for our client in key_rotation');
       return;
     }
 
@@ -776,7 +905,7 @@ async function handleKeyRotation(payload) {
     showNotification('Schlüssel-Rotation', `Gruppen-Schlüssel aktualisiert (${Object.keys(groupKeys).length} Mitglieder)`);
 
   } catch (error) {
-    console.error('[MessagingIntegration] ❌ Failed to handle key_rotation:', error.message, error.stack);
+    RevLog.error('[MessagingIntegration] ❌ Failed to handle key_rotation:', error.message, error.stack);
     showNotification('⚠️ Fehler', 'Konnte Schlüssel-Rotation nicht verarbeiten');
   }
 }
@@ -786,7 +915,7 @@ async function handleKeyRotation(payload) {
  * Stops polling, clears all local state and storage — equivalent to a forced logout.
  */
 async function handleAccountDeleted() {
-  console.warn('[MessagingIntegration] 🗑️ account_deleted received — clearing addon state');
+  RevLog.warn('[MessagingIntegration] 🗑️ account_deleted received — clearing addon state');
 
   // Stop polling immediately so no further requests go out
   if (messagingClient) {
@@ -809,7 +938,7 @@ async function handleAccountDeleted() {
       }
     }
   } catch (err) {
-    console.error('[MessagingIntegration] ❌ handleAccountDeleted cleanup failed:', err.message);
+    RevLog.error('[MessagingIntegration] ❌ handleAccountDeleted cleanup failed:', err.message);
   }
 }
 
@@ -819,7 +948,7 @@ async function handleAccountDeleted() {
  */
 function handleClientDisconnect(payload) {
   if (!payload || !payload.fingerprint) {
-    console.error('[MessagingIntegration] ❌ Invalid client_disconnected message: missing fingerprint');
+    RevLog.error('[MessagingIntegration] ❌ Invalid client_disconnected message: missing fingerprint');
     return;
   }
 
@@ -835,7 +964,7 @@ function handleClientDisconnect(payload) {
       showNotification('Client getrennt', `Ein Client wurde ${reasonText}`);
     }
   } else {
-    console.warn('[MessagingIntegration] ⚠️ No messagingClient available for client disconnect');
+    RevLog.warn('[MessagingIntegration] ⚠️ No messagingClient available for client disconnect');
   }
 }
 
@@ -861,7 +990,7 @@ async function storeMessageLog(type, payload) {
 
     await browser.storage.local.set({ messaging_log });
   } catch (error) {
-    console.error('[MessagingIntegration] ❌ Failed to store message log:', error.message);
+    RevLog.error('[MessagingIntegration] ❌ Failed to store message log:', error.message);
   }
 }
 
@@ -934,7 +1063,7 @@ window.MessagingIntegration.clearAllData = async function() {
     messagingClient = null;
 
   } catch (error) {
-    console.error('[MessagingIntegration] ❌ Failed to clear messaging data:', error);
+    RevLog.error('[MessagingIntegration] ❌ Failed to clear messaging data:', error);
     throw error;
   }
 };

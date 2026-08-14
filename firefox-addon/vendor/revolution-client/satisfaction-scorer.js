@@ -10,7 +10,7 @@
  * Version: 2.0.0
  */
 
-class SatisfactionScorer {
+export class SatisfactionScorer {
   constructor(config) {
     this.config = config;
   }
@@ -239,7 +239,7 @@ class SatisfactionScorer {
    * Hauptfunktion: Komplettes Enhanced Scoring
    *
    * Formula:
-   * Final Score = (Enhanced Base Score × Content × Quality × Experience × OSS) + Explicit Bonus
+   * Final Score = (Enhanced Base Score x Content x Quality x Experience x OSS) + Explicit Bonus
    */
   scoreSessionWithSatisfaction(
     sessionData,
@@ -300,14 +300,4 @@ class SatisfactionScorer {
       }
     };
   }
-}
-
-// Export für Browser-Extension
-if (typeof window !== 'undefined') {
-  window.SatisfactionScorer = SatisfactionScorer;
-}
-
-// Export für Node.js/Tests
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = SatisfactionScorer;
 }

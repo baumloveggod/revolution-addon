@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>Revolution Web Connector — Background</title>
+
+<!--
+  Replaces the manifest's `background.scripts` array. The wallet/scoring code is
+  loaded as an ES module from its unmodified sources instead of a bundled file;
+  every other script keeps the exact order it had in `background.scripts`.
+
+  Ordering: a non-async module script and `defer` classic scripts share the same
+  execution list and run in document order, so wallet-globals.js has populated
+  window.* before config.js and background.js execute.
+-->
+<script type="module" src="vendor/revolution-client/wallet-globals.js"></script>
+
+<script defer src="log-client.js"></script>
+<script defer src="config.js"></script>
+<script defer src="services/debugLogger.js"></script>
+<script defer src="services/api-client.js"></script>
+<script defer src="services/update-checker.js"></script>
+<script defer src="services/addon-detector.js"></script>
+<script defer src="services/bridge-detector.js"></script>
+<script defer src="sodium.js"></script>
+<script defer src="messaging-client/crypto.js"></script>
+<script defer src="crypto/sealed-box.js"></script>
+<script defer src="messaging-client/storage.js"></script>
+<script defer src="messaging-client/client.js"></script>
+<script defer src="messaging-integration.js"></script>
+<script defer src="tracking.js"></script>
+<script defer src="privacy/e24-rounding.js"></script>
+<script defer src="privacy/transaction-queue.js"></script>
+<script defer src="privacy/privacy-layer.js"></script>
+<script defer src="ngo/criteria-matcher.js"></script>
+<script defer src="ngo/or-wallet-manager.js"></script>
+<script defer src="scoring/revolution-scoring.js"></script>
+<script defer src="scoring/dsl-scoring-engine.js"></script>
+<script defer src="background.js"></script>

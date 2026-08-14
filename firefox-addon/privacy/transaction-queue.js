@@ -289,6 +289,7 @@ class TransactionQueue {
         destination: transaction.walletAddress,
         fingerprintSHtoDS,
         blockId, // Block must be sealed before spend
+        syncedToWebsite: false, // Flag: signing token successfully streamed to website
         // metadata for post-spend bookkeeping
         _seedManager: seedManager,
         _ratingRef: transaction.ratingRef,
@@ -298,7 +299,9 @@ class TransactionQueue {
       this.mintBuffer.push(mintEntry);
 
       // 5a. Continuously stream mint entry to website for device-loss recovery
-      this._streamMintEntryToWebsite(mintEntry).catch(err => {
+      this._streamMintEntryToWebsite(mintEntry).then(() => {
+        mintEntry.syncedToWebsite = true;
+      }).catch(err => {
         console.warn('[TransactionQueue] ⚠️ Failed to stream mint entry to website (non-blocking):', err.message);
       });
 
@@ -965,6 +968,7 @@ class TransactionQueue {
       destination: entry.destination,
       fingerprintSHtoDS: entry.fingerprintSHtoDS,
       blockId: entry.blockId,
+      syncedToWebsite: entry.syncedToWebsite || false,
       ratingRef: entry._ratingRef,
       pairIndex: entry._pairIndex
     }));

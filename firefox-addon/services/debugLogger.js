@@ -15,6 +15,19 @@
   const FLUSH_INTERVAL = 2000; // Sende Logs alle 2 Sekunden
   const ENABLED = true; // Feature Flag
 
+  // Log-Level System: 'debug' | 'info' | 'warn' | 'error'
+  // In production only 'warn' and 'error' appear in console.
+  // All levels are always sent to the remote logging service.
+  const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
+  let CONSOLE_LOG_LEVEL = 'info'; // default, can be set via setLogLevel()
+
+  /**
+   * Check if a given level should appear in console output
+   */
+  function shouldLogToConsole(level) {
+    return LOG_LEVELS[level] >= LOG_LEVELS[CONSOLE_LOG_LEVEL];
+  }
+
   let flushTimer = null;
   let healthCheckInterval = null;
   let isOnline = true;
@@ -166,10 +179,40 @@
     },
 
     /**
+     * Sets the minimum console log level.
+     * Logs below this level are still sent to the remote service but hidden from console.
+     * @param {'debug'|'info'|'warn'|'error'} level
+     */
+    setLogLevel(level) {
+      if (LOG_LEVELS[level] !== undefined) {
+        CONSOLE_LOG_LEVEL = level;
+      }
+    },
+
+    /**
+     * Returns the current console log level
+     */
+    getLogLevel() {
+      return CONSOLE_LOG_LEVEL;
+    },
+
+    /**
+     * Loggt ein Debug-Event (nur in Console bei debug-Level)
+     */
+    debug(event, message, data = null) {
+      if (shouldLogToConsole('debug')) {
+        console.log(`[DebugLogger] [${event}]`, message, data || '');
+      }
+      queueLog('debug', event, message, data);
+    },
+
+    /**
      * Loggt ein Info-Event
      */
     info(event, message, data = null) {
-      console.log(`[DebugLogger] 🔵 [${event}]`, message, data || '');
+      if (shouldLogToConsole('info')) {
+        console.log(`[DebugLogger] 🔵 [${event}]`, message, data || '');
+      }
       queueLog('info', event, message, data);
     },
 
@@ -177,7 +220,9 @@
      * Loggt ein Success-Event
      */
     success(event, message, data = null) {
-      console.log(`[DebugLogger] ✅ [${event}]`, message, data || '');
+      if (shouldLogToConsole('info')) {
+        console.log(`[DebugLogger] ✅ [${event}]`, message, data || '');
+      }
       queueLog('success', event, message, data);
     },
 
@@ -185,7 +230,9 @@
      * Loggt ein Warning-Event
      */
     warning(event, message, data = null) {
-      console.warn(`[DebugLogger] ⚠️ [${event}]`, message, data || '');
+      if (shouldLogToConsole('warn')) {
+        console.warn(`[DebugLogger] ⚠️ [${event}]`, message, data || '');
+      }
       queueLog('warning', event, message, data);
     },
 
@@ -193,7 +240,9 @@
      * Loggt ein Error-Event
      */
     error(event, message, data = null) {
-      console.error(`[DebugLogger] ❌ [${event}]`, message, data || '');
+      if (shouldLogToConsole('error')) {
+        console.error(`[DebugLogger] ❌ [${event}]`, message, data || '');
+      }
       queueLog('error', event, message, data);
     },
 
@@ -229,9 +278,7 @@
         DebugLogger.success('session_scored', 'Session scored successfully', {
           sessionId: sessionId?.substring(0, 8),
           Rating: score,
-          sicherheitsFaktor: metadata?.safetyFactor || 0,
-          seedCLtoSH: metadata?.seedCLtoSH?.substring(0, 16) + '...' || 'N/A',
-          seedSHtoDS: metadata?.seedSHtoDS?.substring(0, 16) + '...' || 'N/A'
+          sicherheitsFaktor: metadata?.safetyFactor || 0
         });
       },
 
@@ -325,14 +372,28 @@
     }
   };
 
+  /**
+   * RevLog — lightweight console wrapper respecting the global log level.
+   * Usage: RevLog.debug('[Component]', 'message', data);
+   *        RevLog.info(...)  RevLog.warn(...)  RevLog.error(...)
+   */
+  const RevLog = {
+    debug(...args) { if (shouldLogToConsole('debug')) console.log(...args); },
+    info(...args)  { if (shouldLogToConsole('info'))  console.log(...args); },
+    warn(...args)  { if (shouldLogToConsole('warn'))  console.warn(...args); },
+    error(...args) { if (shouldLogToConsole('error')) console.error(...args); }
+  };
+
   // Exportiere als globales Objekt
   if (typeof window !== 'undefined') {
     window.DebugLogger = DebugLogger;
+    window.RevLog = RevLog;
   }
 
   // Browser Extension Context
   if (typeof self !== 'undefined' && typeof self.browser !== 'undefined') {
     self.DebugLogger = DebugLogger;
+    self.RevLog = RevLog;
   }
 
   // Flush beim Beenden
@@ -342,5 +403,8 @@
     });
   }
 
-  console.log('[DebugLogger] Module loaded');
+  // Module loaded log only in debug mode
+  if (shouldLogToConsole('debug')) {
+    console.log('[DebugLogger] Module loaded');
+  }
 })();
