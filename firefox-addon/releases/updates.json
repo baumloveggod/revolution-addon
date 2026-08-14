@@ -1,6 +1,6 @@
 {
   "addons": {
-    "revolution@lenkenhoff.de": {
+    "revolution-selfhosted@lenkenhoff.de": {
       "updates": [
         {
           "version": "1.2.0",

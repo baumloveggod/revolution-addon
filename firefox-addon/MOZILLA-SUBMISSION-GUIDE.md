@@ -3,7 +3,7 @@
 
 ### 📦 Vorbereitete Dateien
 
-Bereits erstellt und bereit (Version 1.1.0, Add-on-ID `revolution@lenkenhoff.de`):
+Bereits erstellt und bereit (Version 1.2.0, Add-on-ID `revolution-selfhosted@lenkenhoff.de` — abweichend von der Listed-Store-ID `revolution@lenkenhoff.de`, da AMO pro ID nur eine Einreichung erlaubt):
 - ✅ `build/revolution-addon.zip` (420K) - Das Addon
 - ✅ `build/revolution-addon-source.zip` (444K) - Quellcode für Reviewer
 
@@ -93,7 +93,7 @@ detaillierten Informationen.
 
 ### 8. Addon-Details ausfüllen
 
-**Version Number:** `1.1.0` (bereits in manifest.json)
+**Version Number:** `1.2.0` (bereits in manifest.json)
 
 **Release Notes (optional):**
 ```

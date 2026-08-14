@@ -18,7 +18,7 @@ CREDS_FILE="$ADDON_DIR/.amo-credentials"
 BUILD_DIR="$ADDON_DIR/build"
 RELEASES_DIR="$ADDON_DIR/releases"
 UPDATES_JSON="$RELEASES_DIR/updates.json"
-ADDON_ID="revolution@lenkenhoff.de"
+ADDON_ID="revolution-selfhosted@lenkenhoff.de"
 UPDATE_BASE_URL="https://updates.lenkenhoff.de/revolution-addon"
 
 if [ ! -f "$CREDS_FILE" ]; then
