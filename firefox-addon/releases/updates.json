@@ -1,0 +1,13 @@
+{
+  "addons": {
+    "revolution@lenkenhoff.de": {
+      "updates": [
+        {
+          "version": "1.2.0",
+          "update_link": "https://updates.lenkenhoff.de/revolution-addon/revolution-addon-1.2.0.xpi",
+          "update_hash": "sha256:PENDING_FIRST_SIGN"
+        }
+      ]
+    }
+  }
+}

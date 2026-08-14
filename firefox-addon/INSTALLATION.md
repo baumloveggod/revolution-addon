@@ -49,12 +49,18 @@ Alternative zu Developer Edition:
 
 ---
 
-### ❌ Lösung 4: Signierung (Nicht empfohlen für Development)
+### ✅ Lösung 4: Alpha-Test (signiert, Self-Distribution)
 
-Nur für Produktion, weil:
-- Mozilla-Review dauert 1-7 Tage
-- Jede Änderung = neues Review
-- Nur sinnvoll bei fertigen Versionen
+**Vorteile:** Kein `about:config`-Hack nötig, läuft in normalem Firefox, aktualisiert sich künftig automatisch.
+
+**Schritte für Alpha-Tester:**
+1. Signiertes `.xpi` herunterladen (Link kommt vom Entwickler, z. B. `https://updates.lenkenhoff.de/revolution-addon/revolution-addon-<version>.xpi`)
+2. Firefox öffnen, `.xpi`-Datei per Drag & Drop ins Fenster ziehen
+   ODER `about:addons` → Zahnrad-Icon → "Install Add-on From File..." → Datei auswählen
+3. Installation bestätigen
+4. ✅ Addon bleibt nach Neustarts erhalten und prüft künftig automatisch auf neue Versionen über `update_url` (manuell auslösbar: `about:addons` → Zahnrad → "Nach Updates suchen")
+
+Signing-Workflow für den Entwickler: siehe `sign-lite.sh` und Abschnitt "Release-Workflow" unten.
 
 ---
 
@@ -62,7 +68,17 @@ Nur für Produktion, weil:
 
 **Für Entwicklung:** Firefox Developer Edition
 **Für schnelles Testen:** `./start-addon-dev.sh`
-**Für Produktion:** Mozilla-Signierung
+**Für Alpha-Tester:** signiertes `.xpi` (Lösung 4)
+
+---
+
+## Release-Workflow (für neue Alpha-Versionen)
+
+1. Version in `manifest.json` erhöhen (z. B. `1.2.0` → `1.2.1`)
+2. `./sign-lite.sh` ausführen (baut, signiert über AMO, aktualisiert `releases/updates.json`)
+   - Voraussetzung: `.amo-credentials` mit `AMO_JWT_ISSUER`/`AMO_JWT_SECRET` aus https://addons.mozilla.org/developers/addon/api/key/
+3. Erzeugtes `releases/revolution-addon-<version>.xpi` + `releases/updates.json` auf den Server hochladen (Pfad, der unter `https://updates.lenkenhoff.de/revolution-addon/` ausgeliefert wird)
+4. Fertig — bereits installierte Alpha-Addons ziehen das Update automatisch über `update_url`
 
 ---
 
@@ -70,6 +86,6 @@ Nur für Produktion, weil:
 
 - ✅ Addon funktioniert auf localhost:3000
 - ❌ Noch keine produktive Domain konfiguriert
-- ❌ Noch nicht signiert
+- ⏳ Signing vorbereitet (`sign-lite.sh`), erster signierter Build steht noch aus (fehlende AMO-API-Credentials)
 
 Für Nutzung auf mehreren Geräten muss eine produktive Domain in der manifest.json konfiguriert werden.

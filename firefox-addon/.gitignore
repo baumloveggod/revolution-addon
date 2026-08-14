@@ -7,3 +7,6 @@ dev-credentials.json
 # Build-Artefakte
 build/
 dist/
+
+# Signierte .xpi-Releases (werden auf den Server hochgeladen, nicht committed)
+releases/*.xpi

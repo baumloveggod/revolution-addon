@@ -2,7 +2,7 @@
   "manifest_version": 2,
   "name": "Revolution Web Connector",
   "description": "Koppelt das Add-on mit der Revolution-Webseite und übernimmt den Login-Status automatisch.",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "browser_action": {
     "default_title": "Revolution verbinden",
     "default_popup": "popup.html"
@@ -35,6 +35,7 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "revolution@lenkenhoff.de",
+      "update_url": "https://updates.lenkenhoff.de/revolution-addon/updates.json",
       "data_collection_permissions": {
         "required": ["browsingActivity"]
       }
