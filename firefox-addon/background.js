@@ -900,6 +900,70 @@ const manifest = typeof browser !== 'undefined' && browser.runtime && browser.ru
 const ADDON_VERSION = (manifest && manifest.version) || 'dev';
 const DEVICE_NAME = `Firefox Add-on${ADDON_VERSION ? ` v${ADDON_VERSION}` : ''}`;
 const DEVICE_TYPE = 'browser_addon';
+
+// ===== FIREFOX PROFILE NAME DETECTION =====
+// Firefox does not expose profile name directly via WebExtension API.
+// We use a heuristic approach to detect it.
+
+/**
+ * Generate UUID v4
+ * @returns {string} - Random UUID
+ */
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+/**
+ * Get Firefox profile name
+ * Generates a unique profile identifier that is different for each Firefox profile
+ * Uses a random UUID stored in local storage (not sync storage) to ensure uniqueness
+ * Returns: profile name string or null if undetectable
+ */
+async function getFirefoxProfileName() {
+  try {
+    // Check cached value in storage
+    const stored = await browser.storage.local.get('revolution_profile_name');
+    if (stored.revolution_profile_name) {
+      return stored.revolution_profile_name;
+    }
+
+    // Generate a unique profile identifier using UUID
+    // This ensures different Firefox profiles get different identifiers
+    // even when using the same addon installation
+    const profileId = generateUUID();
+    const profileName = `profile_${profileId.substring(0, 8)}`;
+    
+    // Cache the profile name in local storage (NOT sync storage)
+    // Using local storage ensures each profile maintains its own identifier
+    await browser.storage.local.set({ revolution_profile_name: profileName });
+    
+    return profileName;
+
+  } catch (error) {
+    console.warn('[getFirefoxProfileName] Could not detect profile name:', error.message);
+    return null;
+  }
+}
+
+/**
+ * Get profile name and update DEVICE_METADATA dynamically
+ * This is used during device registration to include profile info
+ */
+async function getDeviceMetadataWithProfile() {
+  const profileName = await getFirefoxProfileName();
+  
+  return {
+    ...DEVICE_METADATA,
+    profile_name: profileName || null,
+    // Include detection timestamp
+    profile_detected_at: new Date().toISOString()
+  };
+}
+
 const DEVICE_METADATA = Object.freeze({
   device_type: DEVICE_TYPE,
   addon: 'firefox',
@@ -1356,13 +1420,22 @@ async function claimInvite(origin, inviteToken, userToken) {
     throw new Error('Messaging keys are required for device registration');
   }
 
+  // Get device metadata with profile name
+  const deviceMetadata = await getDeviceMetadataWithProfile();
+  
+  // Build device name with profile information for better distinction
+  const profileName = deviceMetadata.profile_name || null;
+  const deviceNameWithProfile = profileName 
+    ? `${DEVICE_NAME} (Profil: ${profileName})` 
+    : DEVICE_NAME;
+  
   const registrationRequest = {
     type: 'DEVICE_REGISTRATION_REQUEST',
     inviteToken: inviteToken,
-    deviceName: DEVICE_NAME,
+    deviceName: deviceNameWithProfile,
     deviceType: 'browser_addon',
     metadata: {
-      ...DEVICE_METADATA,
+      ...deviceMetadata,
       claimed_at: new Date().toISOString()
     },
     // Binary Model: messagingAddress = signingPublicKey, encryptionKey = publicKey
@@ -4171,12 +4244,3 @@ async function sendToWebsiteOnly(messagingClient, payload, websitePublicKey) {
 /**
  * Extract domain from URL
  */
-function extractDomain(url) {
-  if (!url) return 'unknown';
-  try {
-    const urlObj = new URL(url);
-    return urlObj.hostname;
-  } catch (error) {
-    return 'unknown';
-  }
-}
