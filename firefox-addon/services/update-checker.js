@@ -7,7 +7,7 @@
 
 class UpdateChecker {
   constructor() {
-    this.checkInterval = 24 * 60 * 60 * 1000; // 24 hours
+    this.checkInterval = 60 * 60 * 1000; // 1 hour
     this.serverApiUrl = 'https://api.lenkenhoff.de'; // Will be set from state
   }
 
