@@ -227,22 +227,41 @@ class RevolutionScoring {
             }
           }
 
-          // Domain weight from user preferences
+          // Content-type-adjusted score, before the domain-target weight is applied.
+          // This is the baseline the domain weight (and its back-calculated floor,
+          // see below) multiplies against.
+          const preDomainWeightScore = scoringResult.score * prefMultiplier;
+
+          // Domain weight from user preferences (dashboard slider, 0-2.0, default 1.0).
+          // The user is explicitly allowed to set a target below what has already
+          // been paid out for this domain - that's not capped/overridden here (see
+          // Umsetzungsplan Domain-Ziel-Faktor). Instead, the score actually used for
+          // the scoring sum (30-day sliding window) and shown in breakdown is the
+          // higher of (a) the naive target-weighted score and (b) a back-calculated
+          // score: the minimum contribution this rating needs to make so the domain's
+          // projected tokens don't fall below what's already been paid.
+          let domainWeight = null;
+          let finalScore = preDomainWeightScore;
+          let backCalculated = false;
           if (userPrefs.domainWeights && userPrefs.domainWeights[domain] != null) {
-            const dw = userPrefs.domainWeights[domain];
-            prefMultiplier *= dw;
+            domainWeight = userPrefs.domainWeights[domain];
+            const naiveWeightedScore = preDomainWeightScore * domainWeight;
+            const floorScore = await this._computeDomainScoreFloor(domain, preDomainWeightScore);
+            finalScore = Math.max(naiveWeightedScore, floorScore);
+            backCalculated = finalScore > naiveWeightedScore + 0.0001;
           }
 
-          // Apply combined preference multiplier
-          if (prefMultiplier !== 1.0) {
+          if (finalScore !== scoringResult.score) {
             const adjusted = Math.max(0, Math.min(
               this.scoringEngine.config.scores.MAX_SCORE,
-              Math.floor(scoringResult.score * prefMultiplier)
+              Math.floor(finalScore)
             ));
             scoringResult.breakdown = scoringResult.breakdown || {};
             scoringResult.breakdown.userPreferences = {
               applied: true,
-              multiplier: prefMultiplier,
+              contentTypeMultiplier: prefMultiplier,
+              domainWeight: domainWeight,
+              backCalculated: backCalculated,
               originalScore: scoringResult.score,
               adjustedScore: adjusted
             };
@@ -1123,6 +1142,48 @@ class RevolutionScoring {
       UNKNOWN: 'learning'
     };
     return map[type] || 'learning';
+  }
+
+  /**
+   * Back-calculates the minimum score this rating needs to contribute so the
+   * domain's projected tokens (30-day sliding window, see TranslationFactorTracker)
+   * don't fall below what has already been paid out for that domain.
+   *
+   * Lets the user set a target weight below the already-paid amount (they may
+   * genuinely want to reduce a domain's share going forward) without silently
+   * shortchanging money that's already been sent - see Umsetzungsplan Domain-Ziel-Faktor.
+   *
+   * @param {string} domain
+   * @param {number} preDomainWeightScore - score for this event before the domain weight is applied
+   * @returns {Promise<number>} floor score (0 if no adjustment is needed)
+   */
+  async _computeDomainScoreFloor(domain, preDomainWeightScore) {
+    if (!this.translationFactorTracker) return 0;
+
+    const paidStored = await browser.storage.local.get('rev_paid_amounts');
+    const alreadyPaid = Number((paidStored.rev_paid_amounts || {})[domain] || 0n);
+    if (alreadyPaid <= 0) return 0;
+
+    const ratings = await this.translationFactorTracker.getRatingsLast30Days();
+    let domainWindowScore = 0;
+    let totalWindowScore = 0;
+    for (const r of ratings) {
+      totalWindowScore += r.score || 0;
+      if (r.domain === domain) domainWindowScore += r.score || 0;
+    }
+    const othersScore = totalWindowScore - domainWindowScore;
+
+    const budgetTokens = Number(this.translationFactorTracker.BUDGET_TOKENS);
+    const denominator = budgetTokens - alreadyPaid;
+    if (denominator <= 0) {
+      // Already-paid amount alone consumes the entire sliding-window budget -
+      // no finite floor exists. Fall back to not reducing this event's contribution.
+      return preDomainWeightScore;
+    }
+
+    const requiredTotalDomainScore = (alreadyPaid * othersScore) / denominator;
+    const requiredThisEventScore = requiredTotalDomainScore - domainWindowScore;
+    return Math.max(0, requiredThisEventScore);
   }
 
   /**

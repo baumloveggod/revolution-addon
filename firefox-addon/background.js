@@ -114,16 +114,18 @@ async function loadDeviceDSL() {
  * runtime context. The server returns ALL children — the client picks
  * which to follow based on what it actually knows right now.
  */
-function childMatchesContext(child, _tab, tabUrl) {
+function childMatchesContext(child, _tab, tabUrl, domain) {
   if (!child || typeof child.kind !== 'string' || typeof child.key !== 'string') return false;
   switch (child.kind) {
     case 'domain': {
       // Special wildcard from device bootstrap: "you may probe any domain"
       if (child.key === '__any__') return true;
+      // For addon domains, use the extracted domain. Otherwise use tabUrl.host
+      const hostToMatch = domain && domain.startsWith('addon:') ? domain : tabUrl.host;
       // Otherwise the child key is "host" or "host/path" — must match the
       // current tab's URL prefix.
-      if (!child.key.startsWith(tabUrl.host)) return false;
-      const afterHost = child.key.slice(tabUrl.host.length);
+      if (!child.key.startsWith(hostToMatch)) return false;
+      const afterHost = child.key.slice(hostToMatch.length);
       if (afterHost === '' || afterHost === '/') return true;
       return tabUrl.pathname.startsWith(afterHost);
     }
@@ -157,6 +159,12 @@ async function walkDSLForTab(tab) {
     return results;
   }
 
+  // Extrahiere Domain mit unserer angepassten Funktion (für moz-extension:// URLs)
+  const domain = await extractDomain(tab.url);
+  if (!domain) {
+    return results;
+  }
+
   // Root match: device-level DSL. Without this, page_visit (which only
   // lives in device-slots.json) never fires and every session is
   // discarded by RevolutionScoring as "No DSL score".
@@ -176,12 +184,12 @@ async function walkDSLForTab(tab) {
     if (resp.match) results.push(resp.match);
 
     for (const child of (resp.children || [])) {
-      if (!childMatchesContext(child, tab, tabUrl)) continue;
+      if (!childMatchesContext(child, tab, tabUrl, domain)) continue;
       await visit(child.kind, child.key, depth + 1);
     }
   }
 
-  await visit('domain', tabUrl.host, 0);
+  await visit('domain', domain, 0);
   return results;
 }
 
@@ -3518,7 +3526,7 @@ async function handleSessionCompleted(sessionSummary) {
     }
 
     // Extrahiere Domain aus URL
-    const domain = extractDomain(sessionSummary.url);
+    const domain = await extractDomain(sessionSummary.url);
     if (!domain) {
       console.warn('[revolution-addon] No valid domain found, skipping session');
       if (typeof DebugLogger !== 'undefined') {
@@ -3710,12 +3718,106 @@ async function handleSessionCompleted(sessionSummary) {
 }
 
 /**
- * Extrahiert Domain aus URL
+ * Extrahiert Add-on-Name und Version aus dem Add-on-Kontext
+ * Für Firefox Add-ons: verwendet browser.runtime.getManifest() oder die Add-on-ID
  */
-function extractDomain(url) {
+async function getAddonName() {
+  try {
+    // Versuche, den Add-on-Namen und die Version aus dem Manifest zu holen
+    if (typeof browser !== 'undefined' && browser.runtime && browser.runtime.getManifest) {
+      const manifest = browser.runtime.getManifest();
+      return {
+        name: manifest.name || manifest.id || 'unknown-addon',
+        version: manifest.version || '0.0.0'
+      };
+    }
+    return { name: 'unknown-addon', version: '0.0.0' };
+  } catch (error) {
+    console.warn('[extractDomain] Could not get addon name:', error);
+    return { name: 'unknown-addon', version: '0.0.0' };
+  }
+}
+
+/**
+ * Prüft, ob eine IP-Adresse privat ist (RFC 1918, RFC 4193)
+ */
+function isPrivateIP(hostname) {
+  if (!hostname) return false;
+  
+  // IPv4: localhost
+  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
+  
+  // IPv4: Private Netzwerke (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+  if (/^10\./.test(hostname)) return true;
+  if (/^192\.168\./.test(hostname)) return true;
+  if (/^172\.(1[6-9]|2[0-9]|3[0-1])\/./.test(hostname)) return true;
+  
+  // IPv6: Unique Local Addresses (fc00::/7) und Link-Local (fe80::/10)
+  if (/^[fcFD][0-9a-fA-F:]+$/.test(hostname) || /^fe[89abAB][0-9a-fA-F:]+$/.test(hostname)) return true;
+  
+  return false;
+}
+
+/**
+ * Extrahiert Domain aus URL mit neuem Schema:
+ * - file:// → null (ignorieren)
+ * - moz-extension:// → <name>.addon[/path]
+ * - localhost/private IPs → <hostname>.local[/path]
+ * - normale URLs → hostname
+ */
+async function extractDomain(url) {
   if (!url) return null;
   try {
     const urlObj = new URL(url);
+    
+    // 1. Lokale Dateien (file://) → ignorieren
+    if (urlObj.protocol === 'file:') {
+      return null;
+    }
+    
+    // 2. Firefox Add-on URLs (moz-extension://)
+    if (urlObj.protocol === 'moz-extension:') {
+      const { name, version } = await getAddonName();
+      // Normalisiere den Namen: ersetze Leerzeichen mit Bindestrichen und kleinschreiben
+      const normalizedName = name
+        .toLowerCase()
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9-]/g, '');
+      
+      // Basis-Domain: <name>.addon
+      let domain = `${normalizedName}.addon`;
+      
+      // Füge Path hinzu, falls vorhanden (z. B. /options)
+      if (urlObj.pathname && urlObj.pathname !== '/') {
+        domain += urlObj.pathname;
+      }
+      
+      return domain;
+    }
+    
+    // 3. Lokale Hosts (localhost, 127.0.0.1, private IPs)
+    const hostname = urlObj.hostname;
+    if (isPrivateIP(hostname)) {
+      // Versuche, Reverse-DNS zu nutzen oder Hostname zu normalisieren
+      let normalizedHostname = hostname;
+      
+      // Für localhost und IPs: versuche einen sinnvollen Namen zu generieren
+      if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+        normalizedHostname = 'localhost';
+      }
+      
+      // Basis-Domain: <hostname>.local
+      let domain = `${normalizedHostname}.local`;
+      
+      // Füge Path hinzu, falls vorhanden
+      if (urlObj.pathname && urlObj.pathname !== '/') {
+        domain += urlObj.pathname;
+      }
+      
+      return domain;
+    }
+    
+    // 4. Standardverhalten für normale URLs
     return urlObj.hostname;
   } catch (error) {
     return null;
@@ -4064,7 +4166,7 @@ async function sendRatingMessageToWebsite(result, sessionSummary, messagingClien
       timestamp: Date.now(),
       paymentType: 'anonymous',
       url: sessionSummary.url || null,
-      domain: result.distribution?.domain || extractDomain(sessionSummary.url),
+      domain: result.distribution?.domain || await extractDomain(sessionSummary.url),
       breakdown: result.scoring?.breakdown || null,
       distribution: {
         beneficiaries: result.scoring?.metadata?.dslDistribution || null,
