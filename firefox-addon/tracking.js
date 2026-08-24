@@ -92,11 +92,32 @@ class TimeMetric extends MetricCollector {
     if (this.isRunning && this.startTime) {
       currentValue += Date.now() - this.startTime;
     }
+    
+    // FIX: Sicherheits-Cap für unzumutbar lange Zeiten in Millisekunden
+    // Maximal 24 Stunden (86400000 ms)
+    const MAX_MS_PER_SESSION = 24 * 60 * 60 * 1000;
+    if (currentValue > MAX_MS_PER_SESSION) {
+      console.warn(`[TimeMetric] Unreasonably long ${this.type} time: ${currentValue}ms (capped to ${MAX_MS_PER_SESSION}ms)`);
+      currentValue = MAX_MS_PER_SESSION;
+    }
+    
     return Math.floor(currentValue); // in Millisekunden
   }
 
   getValueInSeconds() {
-    return Math.floor(this.getValue() / 1000);
+    const ms = this.getValue();
+    const seconds = Math.floor(ms / 1000);
+    
+    // FIX: Sicherheits-Cap für unzumutbar lange Zeiten
+    // (verhindert falsche Werte durch Bugs wie Race Conditions)
+    // Maximal 24 Stunden pro Session (86400 Sekunden)
+    const MAX_SECONDS_PER_SESSION = 24 * 60 * 60;
+    if (seconds > MAX_SECONDS_PER_SESSION) {
+      console.warn(`[TimeMetric] Unreasonably long ${this.type} time: ${seconds}s (capped to ${MAX_SECONDS_PER_SESSION}s)`);
+      return MAX_SECONDS_PER_SESSION;
+    }
+    
+    return seconds;
   }
 
   serialize() {
@@ -288,17 +309,23 @@ class PageVisitTracker {
 
     // Tab wird aktiviert
     browser.tabs.onActivated.addListener((activeInfo) => {
-      setTimeout(() => {
-        this.handleTabActivated(activeInfo.tabId, activeInfo.windowId).catch(err => {
+      setTimeout(async () => {
+        try {
+          await this.handleTabActivated(activeInfo.tabId, activeInfo.windowId);
+        } catch (err) {
           console.error('[tracking] handleTabActivated failed:', err);
-        });
+        }
       }, 0);
     });
 
     // Tab wird geschlossen
     browser.tabs.onRemoved.addListener((tabId, removeInfo) => {
-      setTimeout(() => {
-        this.handleTabClosed(tabId);
+      setTimeout(async () => {
+        try {
+          await this.handleTabClosed(tabId);
+        } catch (err) {
+          console.error('[tracking] handleTabClosed failed:', err);
+        }
       }, 0);
     });
 
@@ -306,8 +333,13 @@ class PageVisitTracker {
     browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       if (changeInfo.url) {
         // CRITICAL: Defer immediately to avoid blocking page navigation
-        setTimeout(() => {
-          this.handleTabUrlChanged(tabId, changeInfo.url, tab);
+        // FIX: Handler ist jetzt async, also müssen wir den Promise handle
+        setTimeout(async () => {
+          try {
+            await this.handleTabUrlChanged(tabId, changeInfo.url, tab);
+          } catch (err) {
+            console.error('[tracking] handleTabUrlChanged failed:', err);
+          }
         }, 0);
       }
     });
@@ -334,14 +366,20 @@ class PageVisitTracker {
 
   /**
    * Startet eine neue Session für einen Tab
+   * FIX: Synchrones Beenden der alten Session VOR Erstellen der neuen
+   *      um Race Conditions zu vermeiden (passiveTime/activeTime läuft sonst weiter)
    */
-  startSession(tabId, url, windowId) {
+  async startSession(tabId, url, windowId) {
     // Beende existierende Session für diesen Tab falls vorhanden
+    // FIX: WARTEN bis die alte Session vollständig beendet ist
     if (this.activeSessions.has(tabId)) {
-      // PERFORMANCE FIX: Don't wait for session to end, run async
-      this.endSession(tabId).catch(err => {
+      try {
+        await this.endSession(tabId);
+      } catch (err) {
         console.error('[tracking] Failed to end existing session:', err);
-      });
+        // Auch bei Fehler: alte Session aus Map entfernen, um konsistenten Zustand zu gewährleisten
+        this.activeSessions.delete(tabId);
+      }
     }
 
     const session = new PageVisitSession(url, tabId, windowId);
@@ -391,9 +429,10 @@ class PageVisitTracker {
 
   /**
    * Tab wurde aktiviert
+   * FIX: Synchrones Erstellen von Sessions, um Race Conditions zu vermeiden
    */
   async handleTabActivated(tabId, windowId) {
-    // Deaktiviere vorherige aktive Session
+    // Deaktiviere vorherige aktive Session (synchron - deactivate() ist nicht async)
     if (this.activeTabId && this.activeTabId !== tabId) {
       const prevSession = this.activeSessions.get(this.activeTabId);
       if (prevSession) {
@@ -410,7 +449,8 @@ class PageVisitTracker {
       try {
         const tab = await browser.tabs.get(tabId);
         if (tab.url && !tab.url.startsWith('about:')) {
-          session = this.startSession(tabId, tab.url, windowId);
+          // FIX: WARTEN bis Session erstellt ist
+          session = await this.startSession(tabId, tab.url, windowId);
         }
       } catch (error) {
         console.warn('[tracking] Fehler beim Abrufen der Tab-Info:', error);
@@ -425,12 +465,14 @@ class PageVisitTracker {
 
   /**
    * Tab wurde geschlossen
+   * FIX: Async Handler für konsistentes Session-Management
    */
-  handleTabClosed(tabId) {
-    // PERFORMANCE FIX: Don't wait for session to end, run async
-    this.endSession(tabId).catch(err => {
+  async handleTabClosed(tabId) {
+    try {
+      await this.endSession(tabId);
+    } catch (err) {
       console.error('[tracking] Failed to end session on tab close:', err);
-    });
+    }
 
     if (this.activeTabId === tabId) {
       this.activeTabId = null;
@@ -439,21 +481,23 @@ class PageVisitTracker {
 
   /**
    * Tab URL hat sich geändert (Navigation)
+   * FIX: Synchrones Beenden und Erstellen von Sessions, um Race Conditions zu vermeiden
    */
-  handleTabUrlChanged(tabId, newUrl, tab) {
+  async handleTabUrlChanged(tabId, newUrl, tab) {
     // Ignoriere about: und chrome: URLs
     if (newUrl.startsWith('about:') || newUrl.startsWith('chrome:')) {
       return;
     }
 
-    // PERFORMANCE FIX: Don't await endSession to avoid blocking the main thread
-    // The session completion callback will run asynchronously
-    this.endSession(tabId).catch(err => {
+    // FIX: WARTEN bis die alte Session vollständig beendet ist
+    try {
+      await this.endSession(tabId);
+    } catch (err) {
       console.error('[tracking] Failed to end session:', err);
-    });
+    }
 
-    // Starte neue Session (immediately, don't wait for old session to finish)
-    const session = this.startSession(tabId, newUrl, tab.windowId);
+    // FIX: WARTEN bis die neue Session erstellt ist
+    const session = await this.startSession(tabId, newUrl, tab.windowId);
 
     // Aktiviere Session wenn Tab aktuell aktiv ist
     if (this.activeTabId === tabId) {
