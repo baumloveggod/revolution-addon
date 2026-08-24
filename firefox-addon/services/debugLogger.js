@@ -274,12 +274,24 @@
         });
       },
 
-      scored(sessionId, score, metadata) {
-        DebugLogger.success('session_scored', 'Session scored successfully', {
+      scored(sessionId, score, metadata, userPreferences) {
+        const payload = {
           sessionId: sessionId?.substring(0, 8),
           Rating: score,
           sicherheitsFaktor: metadata?.safetyFactor || 0
-        });
+        };
+        // Domain-Ziel-Faktor / Rückrechnung (siehe Umsetzungsplan Domain-Ziel-Faktor,
+        // _computeDomainScoreFloor in revolution-scoring.js). Nur geloggt wenn ein
+        // Domain-Ziel für diese Session überhaupt aktiv war.
+        if (userPreferences && userPreferences.applied && userPreferences.domainWeight != null) {
+          payload.domainWeight = userPreferences.domainWeight;
+          payload.backCalculated = !!userPreferences.backCalculated;
+          if (userPreferences.backCalculated) {
+            payload.originalScore = userPreferences.originalScore;
+            payload.adjustedScore = userPreferences.adjustedScore;
+          }
+        }
+        DebugLogger.success('session_scored', 'Session scored successfully', payload);
       },
 
       failed(sessionId, error) {

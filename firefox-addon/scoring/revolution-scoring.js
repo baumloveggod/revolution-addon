@@ -240,15 +240,38 @@ class RevolutionScoring {
           // higher of (a) the naive target-weighted score and (b) a back-calculated
           // score: the minimum contribution this rating needs to make so the domain's
           // projected tokens don't fall below what's already been paid.
+          //
+          // NOTE: a separate 'correction' transaction (via a second
+          // processSessionWithSafetyFactor call) was tried and reverted - it would
+          // mint/spend real tokens through TransactionQueue.executeTransaction but
+          // never get its own sendRatingMessageToWebsite/RATING_FULL call (that only
+          // fires once per processSession(), for the top-level result), so it would
+          // move real money with no corresponding entry in the Verlauf. Folding the
+          // back-calculation into this rating's own score keeps it inside the single
+          // RATING_FULL message that already gets sent - correct and visible
+          // (breakdown.userPreferences.backCalculated, see analytics-rating-transactions.js).
           let domainWeight = null;
           let finalScore = preDomainWeightScore;
           let backCalculated = false;
+          let cappedAt100Percent = false;
           if (userPrefs.domainWeights && userPrefs.domainWeights[domain] != null) {
             domainWeight = userPrefs.domainWeights[domain];
             const naiveWeightedScore = preDomainWeightScore * domainWeight;
             const floorScore = await this._computeDomainScoreFloor(domain, preDomainWeightScore);
-            finalScore = Math.max(naiveWeightedScore, floorScore);
+            const raised = Math.max(naiveWeightedScore, floorScore);
+
+            // The back-calculation may only make up for underpayment - it must never
+            // boost this rating's contribution ABOVE what it would be with NO domain
+            // weighting at all (domainWeight = 1.0, i.e. 100%/preDomainWeightScore).
+            // Otherwise a correction could pay a domain MORE than its natural share,
+            // which isn't "catching up on already-paid tokens" anymore, it's a bonus.
+            // NOTE: preDomainWeightScore stands in for "100% of the current translationFactor
+            // basis". If the translationFactor formula (TranslationFactorTracker /
+            // Umsetzungsplan Domain-Ziel-Faktor) changes, re-check that this cap still
+            // means the same thing.
+            finalScore = Math.min(preDomainWeightScore, raised);
             backCalculated = finalScore > naiveWeightedScore + 0.0001;
+            cappedAt100Percent = raised > preDomainWeightScore + 0.0001;
           }
 
           if (finalScore !== scoringResult.score) {
@@ -262,6 +285,7 @@ class RevolutionScoring {
               contentTypeMultiplier: prefMultiplier,
               domainWeight: domainWeight,
               backCalculated: backCalculated,
+              cappedAt100Percent: cappedAt100Percent,
               originalScore: scoringResult.score,
               adjustedScore: adjusted
             };
