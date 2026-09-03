@@ -8,7 +8,7 @@
  * Erste 30 Tage: Faktor x (secondsSinceBaToCL / (30 * 24 * 60 * 60))
  *
  * Storage Keys:
- * - rev_rating_history_30d: [{date, score, domain, ratingRef}, ...]
+ * - rev_rating_history_30d: [{date, score, domain, ratingRef, preDomainWeightScore}, ...]
  * - rev_translation_factor_history: [{timestamp, factor, totalScore}, ...]
  * - rev_first_ba_to_cl_timestamp: Unix timestamp (seconds) of first BA->CL transfer
  */
@@ -36,7 +36,7 @@ export class TranslationFactorTracker {
    * @param {string} ratingRef - Eindeutige Rating-Referenz
    * @param {number} timestamp - Zeitstempel (optional, default: jetzt)
    */
-  async addRating(score, domain, ratingRef, timestamp = Date.now()) {
+  async addRating(score, domain, ratingRef, timestamp = Date.now(), preDomainWeightScore = null) {
     const data = await this.storage.get(['rev_rating_history_30d']);
     let history = data.rev_rating_history_30d || [];
 
@@ -45,7 +45,8 @@ export class TranslationFactorTracker {
       date: timestamp,
       score: score,
       domain: domain,
-      ratingRef: ratingRef
+      ratingRef: ratingRef,
+      preDomainWeightScore: preDomainWeightScore
     });
 
     // Alte Ratings entfernen (>30 Tage)
