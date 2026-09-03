@@ -121,7 +121,8 @@ export class DistributionEngine {
         scoringResult.score,
         domain,
         ratingRef,
-        Date.now()
+        Date.now(),
+        scoringResult.metadata?.preDomainWeightScore ?? null
       );
     } else {
       console.warn('[DistributionEngine] Cannot add rating - TranslationFactorTracker is null!');
@@ -164,6 +165,9 @@ export class DistributionEngine {
     // 3. ALLE DREI Sicherheitsfaktoren anwenden
     // combinedSF = startSafetyFactor x prognosisSafetyFactor x fluctuationSafetyFactor
     // payoutFactor = 1.0 - safetyFactor (Start-SF)
+    // (Der Domain-Ziel-Faktor aus den User-Preferences wird bereits VOR diesem Aufruf
+    //  auf scoringResult.score angewendet, siehe revolution-scoring.js Schritt 1c -
+    //  hier nochmal zu multiplizieren würde ihn doppelt anwenden.)
     const combinedPayoutFactor = payoutFactor * prognosisSafetyFactor * fluctuationSafetyFactor;
 
     const payoutTokens = BigInt(Math.floor(Number(rawTokens) * combinedPayoutFactor));
