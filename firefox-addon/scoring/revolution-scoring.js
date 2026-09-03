@@ -213,84 +213,83 @@ class RevolutionScoring {
       try {
         const prefStored = await browser.storage.local.get('rev_user_preferences');
         const userPrefs = prefStored.rev_user_preferences;
-        if (userPrefs) {
-          let prefMultiplier = 1.0;
-          const breakdown = scoringResult.breakdown || {};
+        const breakdown = scoringResult.breakdown || {};
 
-          // Content-Type multiplier from user preferences
-          if (userPrefs.contentTypeMultipliers && breakdown.contentType) {
-            const ctType = breakdown.contentType.type || '';
-            const category = this._contentTypeToCategory(ctType);
-            const ctMult = userPrefs.contentTypeMultipliers[category];
-            if (ctMult != null && ctMult !== 1.0) {
-              prefMultiplier *= ctMult;
-            }
+        let prefMultiplier = 1.0;
+        if (userPrefs && userPrefs.contentTypeMultipliers && breakdown.contentType) {
+          const ctType = breakdown.contentType.type || '';
+          const category = this._contentTypeToCategory(ctType);
+          const ctMult = userPrefs.contentTypeMultipliers[category];
+          if (ctMult != null && ctMult !== 1.0) {
+            prefMultiplier *= ctMult;
           }
+        }
 
-          // Content-type-adjusted score, before the domain-target weight is applied.
-          // This is the baseline the domain weight (and its back-calculated floor,
-          // see below) multiplies against.
-          const preDomainWeightScore = scoringResult.score * prefMultiplier;
+        // Content-type-adjusted score, before the domain-target weight is applied.
+        // This is the baseline the domain weight (and its back-calculated floor,
+        // see below) multiplies against. Always computed and stored on metadata
+        // (even with no userPrefs / no domainWeights) so
+        // RetroPayoutService.processDomainWeightChange can recompute this
+        // rating's score later if the domain weight changes (see
+        // docs/superpowers/specs/2026-09-03-domain-weight-retro-correction-design.md).
+        const preDomainWeightScore = scoringResult.score * prefMultiplier;
+        scoringResult.metadata.preDomainWeightScore = preDomainWeightScore;
 
-          // Domain weight from user preferences (dashboard slider, 0-2.0, default 1.0).
-          // The user is explicitly allowed to set a target below what has already
-          // been paid out for this domain - that's not capped/overridden here (see
-          // Umsetzungsplan Domain-Ziel-Faktor). Instead, the score actually used for
-          // the scoring sum (30-day sliding window) and shown in breakdown is the
-          // higher of (a) the naive target-weighted score and (b) a back-calculated
-          // score: the minimum contribution this rating needs to make so the domain's
-          // projected tokens don't fall below what's already been paid.
-          //
-          // NOTE: a separate 'correction' transaction (via a second
-          // processSessionWithSafetyFactor call) was tried and reverted - it would
-          // mint/spend real tokens through TransactionQueue.executeTransaction but
-          // never get its own sendRatingMessageToWebsite/RATING_FULL call (that only
-          // fires once per processSession(), for the top-level result), so it would
-          // move real money with no corresponding entry in the Verlauf. Folding the
-          // back-calculation into this rating's own score keeps it inside the single
-          // RATING_FULL message that already gets sent - correct and visible
-          // (breakdown.userPreferences.backCalculated, see analytics-rating-transactions.js).
-          let domainWeight = null;
-          let finalScore = preDomainWeightScore;
-          let backCalculated = false;
-          let cappedAt100Percent = false;
-          if (userPrefs.domainWeights && userPrefs.domainWeights[domain] != null) {
-            domainWeight = userPrefs.domainWeights[domain];
-            const naiveWeightedScore = preDomainWeightScore * domainWeight;
-            const floorScore = await this._computeDomainScoreFloor(domain, preDomainWeightScore);
-            const raised = Math.max(naiveWeightedScore, floorScore);
+        // Domain weight from user preferences (dashboard slider, 0-2.0, default 1.0).
+        // The user is explicitly allowed to set a target below what has already
+        // been paid out for this domain - that's not capped/overridden here (see
+        // Umsetzungsplan Domain-Ziel-Faktor). Instead, the score actually used for
+        // the scoring sum (30-day sliding window) and shown in breakdown is the
+        // higher of (a) the naive target-weighted score and (b) a back-calculated
+        // score: the minimum contribution this rating needs to make so the domain's
+        // projected tokens don't fall below what's already been paid.
+        //
+        // NOTE: a separate 'correction' transaction (via a second
+        // processSessionWithSafetyFactor call) was tried and reverted - it would
+        // mint/spend real tokens through TransactionQueue.executeTransaction but
+        // never get its own sendRatingMessageToWebsite/RATING_FULL call (that only
+        // fires once per processSession(), for the top-level result), so it would
+        // move real money with no corresponding entry in the Verlauf. Folding the
+        // back-calculation into this rating's own score keeps it inside the single
+        // RATING_FULL message that already gets sent - correct and visible
+        // (breakdown.userPreferences.backCalculated, see analytics-rating-transactions.js).
+        //
+        // A later, separate domain-weight CHANGE is handled retroactively by
+        // RetroPayoutService.processDomainWeightChange using the same
+        // applyDomainWeight/computeDomainScoreFloor helpers - see the retro-
+        // correction design doc referenced above.
+        let domainWeight = null;
+        let finalScore = preDomainWeightScore;
+        let backCalculated = false;
+        let cappedAt100Percent = false;
+        if (userPrefs && userPrefs.domainWeights && userPrefs.domainWeights[domain] != null) {
+          domainWeight = userPrefs.domainWeights[domain];
+          const floorScore = await window.computeDomainScoreFloor(
+            this.translationFactorTracker,
+            browser.storage.local,
+            domain,
+            preDomainWeightScore
+          );
+          ({ finalScore, backCalculated, cappedAt100Percent } =
+            window.applyDomainWeight(preDomainWeightScore, domainWeight, floorScore));
+        }
 
-            // The back-calculation may only make up for underpayment - it must never
-            // boost this rating's contribution ABOVE what it would be with NO domain
-            // weighting at all (domainWeight = 1.0, i.e. 100%/preDomainWeightScore).
-            // Otherwise a correction could pay a domain MORE than its natural share,
-            // which isn't "catching up on already-paid tokens" anymore, it's a bonus.
-            // NOTE: preDomainWeightScore stands in for "100% of the current translationFactor
-            // basis". If the translationFactor formula (TranslationFactorTracker /
-            // Umsetzungsplan Domain-Ziel-Faktor) changes, re-check that this cap still
-            // means the same thing.
-            finalScore = Math.min(preDomainWeightScore, raised);
-            backCalculated = finalScore > naiveWeightedScore + 0.0001;
-            cappedAt100Percent = raised > preDomainWeightScore + 0.0001;
-          }
-
-          if (finalScore !== scoringResult.score) {
-            const adjusted = Math.max(0, Math.min(
-              this.scoringEngine.config.scores.MAX_SCORE,
-              Math.floor(finalScore)
-            ));
-            scoringResult.breakdown = scoringResult.breakdown || {};
-            scoringResult.breakdown.userPreferences = {
-              applied: true,
-              contentTypeMultiplier: prefMultiplier,
-              domainWeight: domainWeight,
-              backCalculated: backCalculated,
-              cappedAt100Percent: cappedAt100Percent,
-              originalScore: scoringResult.score,
-              adjustedScore: adjusted
-            };
-            scoringResult.score = adjusted;
-          }
+        if (finalScore !== scoringResult.score) {
+          const adjusted = Math.max(0, Math.min(
+            this.scoringEngine.config.scores.MAX_SCORE,
+            Math.floor(finalScore)
+          ));
+          scoringResult.breakdown = scoringResult.breakdown || {};
+          scoringResult.breakdown.userPreferences = {
+            applied: true,
+            contentTypeMultiplier: prefMultiplier,
+            domainWeight: domainWeight,
+            backCalculated: backCalculated,
+            cappedAt100Percent: cappedAt100Percent,
+            originalScore: scoringResult.score,
+            adjustedScore: adjusted
+          };
+          scoringResult.score = adjusted;
         }
       } catch (_) {
         // Non-critical: proceed without user preference adjustment
@@ -1166,48 +1165,6 @@ class RevolutionScoring {
       UNKNOWN: 'learning'
     };
     return map[type] || 'learning';
-  }
-
-  /**
-   * Back-calculates the minimum score this rating needs to contribute so the
-   * domain's projected tokens (30-day sliding window, see TranslationFactorTracker)
-   * don't fall below what has already been paid out for that domain.
-   *
-   * Lets the user set a target weight below the already-paid amount (they may
-   * genuinely want to reduce a domain's share going forward) without silently
-   * shortchanging money that's already been sent - see Umsetzungsplan Domain-Ziel-Faktor.
-   *
-   * @param {string} domain
-   * @param {number} preDomainWeightScore - score for this event before the domain weight is applied
-   * @returns {Promise<number>} floor score (0 if no adjustment is needed)
-   */
-  async _computeDomainScoreFloor(domain, preDomainWeightScore) {
-    if (!this.translationFactorTracker) return 0;
-
-    const paidStored = await browser.storage.local.get('rev_paid_amounts');
-    const alreadyPaid = Number((paidStored.rev_paid_amounts || {})[domain] || 0n);
-    if (alreadyPaid <= 0) return 0;
-
-    const ratings = await this.translationFactorTracker.getRatingsLast30Days();
-    let domainWindowScore = 0;
-    let totalWindowScore = 0;
-    for (const r of ratings) {
-      totalWindowScore += r.score || 0;
-      if (r.domain === domain) domainWindowScore += r.score || 0;
-    }
-    const othersScore = totalWindowScore - domainWindowScore;
-
-    const budgetTokens = Number(this.translationFactorTracker.BUDGET_TOKENS);
-    const denominator = budgetTokens - alreadyPaid;
-    if (denominator <= 0) {
-      // Already-paid amount alone consumes the entire sliding-window budget -
-      // no finite floor exists. Fall back to not reducing this event's contribution.
-      return preDomainWeightScore;
-    }
-
-    const requiredTotalDomainScore = (alreadyPaid * othersScore) / denominator;
-    const requiredThisEventScore = requiredTotalDomainScore - domainWindowScore;
-    return Math.max(0, requiredThisEventScore);
   }
 
   /**
