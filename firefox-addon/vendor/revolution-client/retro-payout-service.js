@@ -12,6 +12,8 @@
  * - Nutzt TransactionCorrector für eigentliche Ausführung
  */
 
+import { applyDomainWeight, computeDomainScoreFloor } from './domain-weight.js';
+
 export class RetroPayoutService {
   /**
    * @param {Object} distributionEngine - DistributionEngine instance
@@ -414,6 +416,81 @@ export class RetroPayoutService {
       payoutCreated: true,
       payoutTokens: differenz.toString()
     };
+  }
+
+  /**
+   * Retroactively recomputes every local rating for `domain` in the last 30
+   * days under a new domain weight. Always updates the rating's score (up or
+   * down). Only ever ADDS a correction transaction (never a clawback) - see
+   * docs/superpowers/specs/2026-09-03-domain-weight-retro-correction-design.md.
+   *
+   * Ratings without a stored preDomainWeightScore (created before this field
+   * existed) are skipped, not corrected - they age out of the 30-day window
+   * on their own.
+   *
+   * @param {string} domain
+   * @param {number} newWeight - new domain weight (0-2.0)
+   * @returns {Promise<{ domain: string, newWeight: number, corrections: Array<{ratingRef: string, oldScore: number, newScore: number, correctionTx: object|null}> }>}
+   */
+  async processDomainWeightChange(domain, newWeight) {
+    if (!domain || typeof newWeight !== 'number' || !Number.isFinite(newWeight)) {
+      return { domain, newWeight, corrections: [] };
+    }
+
+    const allRatings = await this.tracker.getRatingsLast30Days();
+    const ratings = allRatings.filter(r => r.domain === domain && r.preDomainWeightScore != null);
+
+    if (ratings.length === 0) {
+      return { domain, newWeight, corrections: [] };
+    }
+
+    const currentFactor = await this.tracker.calculateCurrentFactor();
+    const userData = await this.distributionEngine.getUserData(this.storage);
+    const factorHistory = await this.tracker.getFactorHistory(90);
+    const prognosisSF = this.distributionEngine.prognosisModel.calculatePrognosisSF(factorHistory);
+
+    const corrections = [];
+
+    for (const rating of ratings) {
+      const floorScore = await computeDomainScoreFloor(this.tracker, this.storage, domain, rating.preDomainWeightScore);
+      const { finalScore } = applyDomainWeight(rating.preDomainWeightScore, newWeight, floorScore);
+      const newScore = Math.max(0, Math.floor(finalScore));
+      const oldScore = rating.score;
+
+      if (newScore !== oldScore) {
+        await this.tracker.updateRating(rating.ratingRef, { score: newScore });
+      }
+
+      const storedTransactions = await this.getStoredTransactions();
+      const ratingTxs = storedTransactions.filter(tx => tx.ratingRef === rating.ratingRef);
+      const istTokensSum = ratingTxs.reduce((sum, tx) => {
+        try { return sum + BigInt(tx.istTokens || '0'); } catch (_) { return sum; }
+      }, 0n);
+
+      const updatedRating = { ...rating, score: newScore };
+      const sollTokens = await this.calculateSollTokens(updatedRating, currentFactor, prognosisSF, userData);
+      const differenz = sollTokens - istTokensSum;
+
+      let correctionTx = null;
+      if (differenz >= this.MIN_PAYOUT_TOKENS) {
+        correctionTx = await this.createCorrectionTransaction(
+          updatedRating,
+          ratingTxs,
+          sollTokens,
+          istTokensSum,
+          differenz,
+          currentFactor,
+          prognosisSF,
+          'domain_weight_change'
+        );
+      }
+
+      if (newScore !== oldScore || correctionTx) {
+        corrections.push({ ratingRef: rating.ratingRef, oldScore, newScore, correctionTx });
+      }
+    }
+
+    return { domain, newWeight, corrections };
   }
 
   /**
