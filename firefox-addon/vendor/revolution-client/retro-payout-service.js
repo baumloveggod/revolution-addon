@@ -204,7 +204,7 @@ export class RetroPayoutService {
     const rawTokens = score * currentFactor;
 
     // Start Safety Factor (zeitbasiert)
-    const daysSinceRating = Math.floor((Date.now() - rating.timestamp) / (24 * 60 * 60 * 1000));
+    const daysSinceRating = Math.floor((Date.now() - rating.date) / (24 * 60 * 60 * 1000));
     const startSF = this.distributionEngine.calibrationManager.calculateSafetyFactor(daysSinceRating);
 
     // Combined Payout Factor = (1 - startSF) x prognosisSF
