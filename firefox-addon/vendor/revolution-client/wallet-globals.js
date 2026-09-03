@@ -35,6 +35,7 @@ import { TranslationFactorTracker } from './translation-factor-tracker.js';
 import { DistributionEngine } from './distribution-engine.js';
 import { CalibrationManager } from './calibration-manager.js';
 import { PrognosisModel } from './prognosis-model.js';
+import { applyDomainWeight, computeDomainScoreFloor } from './domain-weight.js';
 
 // --- Safety Factors ---
 import { DampingSafetyFactor } from './damping-safety-factor.js';
@@ -67,6 +68,8 @@ window.TranslationFactorTracker = TranslationFactorTracker;
 window.DistributionEngine = DistributionEngine;
 window.CalibrationManager = CalibrationManager;
 window.PrognosisModel = PrognosisModel;
+window.applyDomainWeight = applyDomainWeight;
+window.computeDomainScoreFloor = computeDomainScoreFloor;
 
 // Safety Factors
 window.DampingSafetyFactor = DampingSafetyFactor;
