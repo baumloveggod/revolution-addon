@@ -4297,13 +4297,27 @@ async function sendDomainCorrectionBatchToWebsite(domain, newWeight, corrections
         console.warn('[revolution-addon] ⚠️ No seeds found for corrected ratingRef, skipping:', correction.ratingRef);
         continue;
       }
+      // Map the internal correctionTx (RetroPayoutService.createCorrectionTransaction)
+      // onto the external website contract: transaction_ref/tokens naming, with the
+      // rating's existing seed pair nested inside correctionTx. Stays null when no
+      // mint happened (score-only change).
+      const internalTx = correction.correctionTx;
+      const outboundTx = internalTx
+        ? {
+            transaction_ref: `${correction.ratingRef}-corr-${internalTx.pairIndex}`,
+            tokens: internalTx.istTokens,   // the minted delta, already a string
+            pairIndex: internalTx.pairIndex,
+            translationFactor: internalTx.translationFactor,
+            seedCLtoSH: seedObj.seedCLtoSH,
+            seedSHtoDS: seedObj.seedSHtoDS
+          }
+        : null;
+
       enrichedCorrections.push(convertBigIntsToStrings({
         ratingRef: correction.ratingRef,
         oldScore: correction.oldScore,
         newScore: correction.newScore,
-        seedCLtoSH: seedObj.seedCLtoSH,
-        seedSHtoDS: seedObj.seedSHtoDS,
-        correctionTx: correction.correctionTx
+        correctionTx: outboundTx
       }));
     }
 

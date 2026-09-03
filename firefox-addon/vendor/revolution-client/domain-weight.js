@@ -36,13 +36,23 @@ export function applyDomainWeight(preDomainWeightScore, domainWeight, floorScore
  * window) so its projected tokens don't fall below what's already been paid
  * out for it.
  *
+ * The floor is expressed as the score THIS event still has to contribute on
+ * top of what the domain already has in the window. In live scoring the event
+ * being evaluated is not yet part of `rev_rating_history_30d`, so the window
+ * sum naturally excludes it. In the retro-correction path the rating being
+ * re-evaluated IS already an entry in that window - passing its ratingRef as
+ * `excludeRatingRef` removes its own current score from the window sum so it
+ * is not counted twice (which would systematically under-compute the floor).
+ *
  * @param {Object|null} tracker - TranslationFactorTracker instance (getRatingsLast30Days, BUDGET_TOKENS)
  * @param {{get(keys): Promise<object>}} storage - storage adapter (rev_paid_amounts)
  * @param {string} domain
  * @param {number} preDomainWeightScore - score for the event being evaluated, before domain weight
+ * @param {string|null} [excludeRatingRef=null] - ratingRef of an existing window entry that
+ *   represents the very event being evaluated; its current score is left out of the window sums
  * @returns {Promise<number>} floor score (0 if no adjustment is needed)
  */
-export async function computeDomainScoreFloor(tracker, storage, domain, preDomainWeightScore) {
+export async function computeDomainScoreFloor(tracker, storage, domain, preDomainWeightScore, excludeRatingRef = null) {
   if (!tracker) return 0;
 
   const paidStored = await storage.get(['rev_paid_amounts']);
@@ -53,6 +63,11 @@ export async function computeDomainScoreFloor(tracker, storage, domain, preDomai
   let domainWindowScore = 0;
   let totalWindowScore = 0;
   for (const r of ratings) {
+    // The event being evaluated must not be counted as part of the window it is
+    // being measured against (retro path only - see excludeRatingRef above).
+    // Skipping it from BOTH sums keeps othersScore identical, because the
+    // excluded entry always belongs to `domain`.
+    if (excludeRatingRef && r.ratingRef === excludeRatingRef) continue;
     totalWindowScore += r.score || 0;
     if (r.domain === domain) domainWindowScore += r.score || 0;
   }

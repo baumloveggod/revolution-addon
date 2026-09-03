@@ -444,15 +444,26 @@ export class RetroPayoutService {
       return { domain, newWeight, corrections: [] };
     }
 
-    const currentFactor = await this.tracker.calculateCurrentFactor();
+    // userData (rev_first_tracking_date / rev_historical_scores / rev_paid_amounts)
+    // and factorHistory (daily factor snapshots) are not touched by the score
+    // updates below, so they can safely be read once up front.
     const userData = await this.distributionEngine.getUserData(this.storage);
     const factorHistory = await this.tracker.getFactorHistory(90);
     const prognosisSF = this.distributionEngine.prognosisModel.calculatePrognosisSF(factorHistory);
 
-    const corrections = [];
-
+    // PASS 1: recompute and persist every score first. No token math here -
+    // each updateRating() changes the 30-day window sum that the translation
+    // factor is derived from, so any factor read mid-loop would be stale for
+    // the ratings processed after it.
+    const scored = [];
     for (const rating of ratings) {
-      const floorScore = await computeDomainScoreFloor(this.tracker, this.storage, domain, rating.preDomainWeightScore);
+      const floorScore = await computeDomainScoreFloor(
+        this.tracker,
+        this.storage,
+        domain,
+        rating.preDomainWeightScore,
+        rating.ratingRef
+      );
       const { finalScore } = applyDomainWeight(rating.preDomainWeightScore, newWeight, floorScore);
       const newScore = Math.max(0, Math.floor(finalScore));
       const oldScore = rating.score;
@@ -461,6 +472,18 @@ export class RetroPayoutService {
         await this.tracker.updateRating(rating.ratingRef, { score: newScore });
       }
 
+      scored.push({ rating, oldScore, newScore });
+    }
+
+    // Read the translation factor ONCE, after every score update from pass 1 is
+    // applied, so all ratings in this batch are valued against the same,
+    // fully-corrected window state.
+    const currentFactor = await this.tracker.calculateCurrentFactor();
+
+    const corrections = [];
+
+    // PASS 2: token math against the fresh factor.
+    for (const { rating, oldScore, newScore } of scored) {
       const storedTransactions = await this.getStoredTransactions();
       const ratingTxs = storedTransactions.filter(tx => tx.ratingRef === rating.ratingRef);
       const istTokensSum = ratingTxs.reduce((sum, tx) => {
