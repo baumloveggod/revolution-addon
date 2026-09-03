@@ -4226,6 +4226,91 @@ async function sendRatingMessageToWebsite(result, sessionSummary, messagingClien
 }
 
 /**
+ * Send a batch of domain-weight-change corrections to the website in one
+ * Sealed-Box message, so the Verlauf/analytics UI can display the updated
+ * scores (and any minted correction transaction) without one HTTP round
+ * trip per rating. See RetroPayoutService.processDomainWeightChange and
+ * docs/superpowers/specs/2026-09-03-domain-weight-retro-correction-design.md.
+ *
+ * @param {string} domain
+ * @param {number} newWeight
+ * @param {Array<{ratingRef: string, oldScore: number, newScore: number, correctionTx: object|null}>} corrections
+ * @param {Object} messagingClient
+ */
+async function sendDomainCorrectionBatchToWebsite(domain, newWeight, corrections, messagingClient) {
+  try {
+    if (!corrections || corrections.length === 0) {
+      return;
+    }
+
+    const websitePublicKey = await getWebsiteMessagingPublicKey();
+    if (!websitePublicKey) {
+      throw new Error('Website messaging public key not available');
+    }
+
+    const seedManager = new FingerprintSeedManager({ storage: browser.storage.local });
+
+    const convertBigIntsToStrings = (obj) => {
+      if (obj === null || obj === undefined) return obj;
+      if (typeof obj === 'bigint') return obj.toString();
+      if (Array.isArray(obj)) return obj.map(convertBigIntsToStrings);
+      if (typeof obj === 'object') {
+        const result = {};
+        for (const [key, value] of Object.entries(obj)) {
+          result[key] = convertBigIntsToStrings(value);
+        }
+        return result;
+      }
+      return obj;
+    };
+
+    const enrichedCorrections = [];
+    for (const correction of corrections) {
+      const seedObj = await seedManager.getSeeds(correction.ratingRef);
+      if (!seedObj) {
+        console.warn('[revolution-addon] ⚠️ No seeds found for corrected ratingRef, skipping:', correction.ratingRef);
+        continue;
+      }
+      enrichedCorrections.push(convertBigIntsToStrings({
+        ratingRef: correction.ratingRef,
+        oldScore: correction.oldScore,
+        newScore: correction.newScore,
+        seedCLtoSH: seedObj.seedCLtoSH,
+        seedSHtoDS: seedObj.seedSHtoDS,
+        correctionTx: correction.correctionTx
+      }));
+    }
+
+    if (enrichedCorrections.length === 0) {
+      return;
+    }
+
+    const batchPayload = {
+      domain,
+      reason: 'domain_weight_change',
+      newWeight,
+      corrections: enrichedCorrections,
+      timestamp: Date.now()
+    };
+
+    const storage = await browser.storage.local.get(['website_keys']);
+    const actualWebsitePublicKey = (storage.website_keys && storage.website_keys.encryption_key) || websitePublicKey;
+
+    const encrypted = await window.SealedBox.encrypt(batchPayload, actualWebsitePublicKey);
+
+    const encryptedMessage = {
+      type: 'RATING_CORRECTION_BATCH',
+      encryptedPayload: encrypted.ciphertext,
+      algorithm: encrypted.algorithm
+    };
+
+    await sendToWebsiteOnly(messagingClient, encryptedMessage, actualWebsitePublicKey);
+  } catch (error) {
+    console.error('[revolution-addon] ❌ Failed to send domain correction batch to website:', error);
+  }
+}
+
+/**
  * Send RATING_SUMMARY to all devices EXCEPT website
  * Privacy: Only contains seedCLtoSH + indices + amounts (NO domain/URL)
  *
