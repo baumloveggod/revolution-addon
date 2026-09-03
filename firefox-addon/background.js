@@ -1208,6 +1208,32 @@ let retroPayoutService = null;
         console.error('[background.js] Failed to drain pending corrections:', drainErr);
       }
 
+      // Drain any domain-weight-change messages that arrived before the
+      // service was ready (handler stored them in pending_domain_weight_changes).
+      try {
+        const storedDW = await browser.storage.local.get('pending_domain_weight_changes');
+        const pendingDW = storedDW.pending_domain_weight_changes || [];
+        if (pendingDW.length > 0) {
+          console.log(`[background.js] Draining ${pendingDW.length} pending domain_weight_change(s)`);
+          for (const change of pendingDW) {
+            try {
+              const result = await retroPayoutService.processDomainWeightChange(change.domain, change.newWeight);
+              if (result.corrections && result.corrections.length > 0) {
+                const messagingClient = window.MessagingIntegration?.getClient();
+                if (messagingClient) {
+                  await sendDomainCorrectionBatchToWebsite(change.domain, change.newWeight, result.corrections, messagingClient);
+                }
+              }
+            } catch (drainErr) {
+              console.error('[background.js] Failed to drain pending domain weight change:', drainErr);
+            }
+          }
+          await browser.storage.local.set({ pending_domain_weight_changes: [] });
+        }
+      } catch (drainErr) {
+        console.error('[background.js] Failed to drain pending domain weight changes:', drainErr);
+      }
+
     } catch (error) {
       console.error('[background.js] ❌ Failed to start RetroPayoutService:', error);
     }

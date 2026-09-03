@@ -464,16 +464,61 @@ async function handlePreferencesUpdate(payload) {
       const changeKeys = Object.keys(data.changes);
       RevLog.debug('[MessagingIntegration] Changes:', changeKeys.join(', '));
 
-      // Domain weight changes — log affected domains
+      // Domain weight changes — retroactively recompute affected ratings
+      // and tell the website about every score/correction that resulted.
       if (data.changes.domainWeights) {
-        const domains = Object.keys(data.changes.domainWeights);
-        RevLog.debug(`[MessagingIntegration] Domain weight changes: ${domains.length} domains`);
+        await applyDomainWeightChanges(data.changes.domainWeights);
       }
     }
 
     showNotification('Einstellungen aktualisiert', 'Neue Bewertungs-Einstellungen von der Webseite empfangen.');
   } catch (error) {
     RevLog.error('[MessagingIntegration] Failed to handle preferences_update:', error.message);
+  }
+}
+
+/**
+ * Applies one or more domain-weight changes (from a PREFERENCES_UPDATE
+ * message's `changes.domainWeights`) via RetroPayoutService, then notifies
+ * the website of every resulting score/correction change.
+ *
+ * If retroPayoutService isn't ready yet, changes are queued in
+ * pending_domain_weight_changes and drained by background.js once the
+ * service starts — mirrors the existing pending_rating_corrections fallback.
+ *
+ * @param {Object} domainWeightChanges - { [domain]: { from: number, to: number } }
+ */
+async function applyDomainWeightChanges(domainWeightChanges) {
+  const domains = Object.keys(domainWeightChanges);
+  RevLog.debug(`[MessagingIntegration] Domain weight changes: ${domains.length} domains`);
+
+  const service = window.retroPayoutService;
+  if (!service || typeof service.processDomainWeightChange !== 'function') {
+    RevLog.warn('[MessagingIntegration] ⚠️ retroPayoutService not ready — domain weight change(s) queued');
+    const stored = await browser.storage.local.get('pending_domain_weight_changes');
+    const pending = stored.pending_domain_weight_changes || [];
+    for (const domain of domains) {
+      pending.push({ domain, newWeight: domainWeightChanges[domain].to });
+    }
+    await browser.storage.local.set({ pending_domain_weight_changes: pending });
+    return;
+  }
+
+  for (const domain of domains) {
+    const newWeight = domainWeightChanges[domain].to;
+    try {
+      const result = await service.processDomainWeightChange(domain, newWeight);
+      if (result.corrections && result.corrections.length > 0 && typeof window.sendDomainCorrectionBatchToWebsite === 'function') {
+        const messagingClient = window.MessagingIntegration?.getClient();
+        if (messagingClient) {
+          await window.sendDomainCorrectionBatchToWebsite(domain, newWeight, result.corrections, messagingClient);
+        } else {
+          RevLog.warn('[MessagingIntegration] ⚠️ No messaging client — domain correction computed locally but not sent to website');
+        }
+      }
+    } catch (error) {
+      RevLog.error(`[MessagingIntegration] ❌ Domain weight retro-correction failed for ${domain}:`, error.message);
+    }
   }
 }
 
