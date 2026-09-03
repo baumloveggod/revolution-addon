@@ -1176,7 +1176,8 @@ let retroPayoutService = null;
       retroPayoutService = new RetroPayoutService(
         window.revolution.distributionEngine,
         window.revolution.distributionEngine.translationFactorTracker,
-        messagingClient
+        messagingClient,
+        browser.storage.local
       );
 
       retroPayoutService.start();
