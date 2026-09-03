@@ -219,7 +219,7 @@ export class RetroPayoutService {
   /**
    * Erstellt eine Korrektur-Transaktion (Nachzahlung)
    */
-  async createCorrectionTransaction(rating, existingTxs, sollTokens, istTokensSum, differenz, currentFactor, prognosisSF) {
+  async createCorrectionTransaction(rating, existingTxs, sollTokens, istTokensSum, differenz, currentFactor, prognosisSF, reason = 'retro_payout_3x_rule') {
     // Pair Index = Anzahl bisheriger Transaktionen
     const pairIndex = existingTxs.length;
 
@@ -247,7 +247,7 @@ export class RetroPayoutService {
       // Metadaten
       translationFactor: currentFactor.toString(),
       prognosisSafetyFactor: prognosisSF,
-      reason: 'retro_payout_3x_rule'
+      reason: reason
     };
 
     // Speichere Transaktion
@@ -267,7 +267,7 @@ export class RetroPayoutService {
         pairIndex,
         type: 'correction',
         metadata: {
-          reason: 'retro_payout_3x_rule',
+          reason: reason,
           sollTokens: sollTokens.toString(),
           previousIstSum: istTokensSum.toString()
         }
