@@ -26,6 +26,7 @@ firefox-addon/config.js
 
 # Claude Code
 .claude/
+.superpowers/
 
 # packages/ build outputs
 packages/**/node_modules/
